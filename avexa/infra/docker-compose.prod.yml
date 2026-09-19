@@ -2,12 +2,14 @@
 #
 #   docker compose --env-file .env -f infra/docker-compose.prod.yml up -d
 #
-# Diferenças que importam em relação ao compose de desenvolvimento:
+# Este arquivo não publica NADA na internet. O painel escuta só em 127.0.0.1,
+# porque a máquina pode já estar servindo outras coisas e disputar a porta 80 é
+# derrubar o que já está no ar. Quem quer que o Avexa cuide do próprio TLS
+# acrescenta o docker-compose.caddy.yml por cima — o deploy faz isso sozinho
+# quando PERFIL_PROXY=caddy.
 #
-#   - o Postgres NÃO publica porta. Na máquina de desenvolvimento 5432 aberta é
-#     conveniência; num IP público é a base de leads de todo mundo exposta.
-#   - o web também não publica porta: quem fala com a internet é o Caddy.
-#   - senha de banco vem do .env, não é `avexa`.
+# O nome do projeto isola tudo: contêineres, rede e volumes ficam com prefixo
+# `avexa` e nada colide com outro projeto na mesma máquina.
 name: avexa
 
 services:
@@ -33,6 +35,9 @@ services:
       NODE_ENV: production
       PORT: '3000'
       HOSTNAME: '0.0.0.0'
+    # Loopback, não 0.0.0.0: invisível da internet, e ainda assim alcançável
+    # pelo proxy que já existe na máquina e pela verificação do deploy.
+    ports: ['127.0.0.1:${PORTA_WEB:-3001}:3000']
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
@@ -47,19 +52,5 @@ services:
       postgres: { condition: service_healthy }
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2-alpine
-    ports: ['80:80', '443:443', '443:443/udp']
-    environment:
-      ACME_EMAIL: ${ACME_EMAIL:-dev@platty.tech}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-dados:/data
-      - caddy-config:/config
-    depends_on: [web]
-    restart: unless-stopped
-
 volumes:
   dados-pg:
-  caddy-dados:
-  caddy-config:

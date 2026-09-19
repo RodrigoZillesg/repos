@@ -1,0 +1,26 @@
+# Camada que só entra quando o Avexa é dono das portas 80 e 443
+# (PERFIL_PROXY=caddy no .env). Se a máquina já tem nginx, Traefik ou outro
+# Caddy servindo, este arquivo NÃO deve ser usado: dois processos disputando a
+# mesma porta significa que um dos dois sai do ar, e pode ser o que já estava
+# funcionando.
+#
+#   docker compose --env-file .env \
+#     -f infra/docker-compose.prod.yml -f infra/docker-compose.caddy.yml up -d
+name: avexa
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-dev@platty.tech}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data
+      - caddy-config:/config
+    depends_on: [web]
+    restart: unless-stopped
+
+volumes:
+  caddy-dados:
+  caddy-config:

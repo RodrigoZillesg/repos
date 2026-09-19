@@ -1,11 +1,46 @@
 # Subir o Avexa no VPS
 
-Uma máquina, quatro contêineres: Postgres, painel, worker e Caddy. Só o Caddy
-fala com a internet; o banco não publica porta nenhuma.
+A máquina pode já estar servindo outras coisas. Tudo aqui foi escrito para o
+Avexa **conviver**, não para tomar conta: contêineres com prefixo próprio,
+volumes próprios, rede própria, e nenhuma mudança em estado global da máquina
+sem você pedir explicitamente.
 
-O deploy sai do GitHub Actions, não da máquina de ninguém. Assim a chave privada
-mora num secret do repositório, cada subida fica registrada com autor e hora, e
-o que vai para produção é exatamente o que está na branch.
+O que o Avexa cria, e nada além disso:
+
+| | |
+| --- | --- |
+| Usuário | `avexa` (no grupo `docker`) |
+| Diretório | `/opt/avexa` |
+| Contêineres | `avexa-postgres-1`, `avexa-web-1`, `avexa-worker-1` (+ `avexa-caddy-1` se for o caso) |
+| Volumes | `avexa_dados-pg` (+ `avexa_caddy-dados`, `avexa_caddy-config`) |
+| Portas | **nenhuma** na internet no perfil `externo`; só `127.0.0.1:3001` |
+
+O que ele **não** toca sem `--firewall` / `--fail2ban`: ufw, fail2ban, sshd,
+nginx ou qualquer outro serviço que já esteja de pé.
+
+## Antes de tudo: olhar a máquina
+
+```sh
+bash diagnostico.sh
+```
+
+Não muda nada — só lê. Diz quem ocupa 80 e 443, o que já roda em Docker, o
+estado do firewall e o que escuta fora do loopback. É a saída dele que decide o
+perfil abaixo.
+
+## Os dois perfis
+
+| | `caddy` | `externo` |
+| --- | --- | --- |
+| Quando | 80 e 443 livres | já tem nginx, Traefik ou outro proxy servindo |
+| TLS | o Caddy do Avexa pede o certificado | de quem já cuida |
+| Portas públicas | 80 e 443 | nenhuma |
+| Painel escuta | rede interna do Docker | `127.0.0.1:3001` |
+
+O `bootstrap.sh` detecta e grava `PERFIL_PROXY` no `.env`. O deploy confere de
+novo a cada execução: se o perfil disser `caddy` mas a 443 estiver ocupada, ele
+**para e não sobe o Caddy** — entre o bootstrap e o deploy alguém pode ter
+instalado um nginx, e subir em cima disso tira do ar o site que funcionava.
 
 ## Uma vez só
 
@@ -20,21 +55,23 @@ secret do GitHub. Não cole em chat, não mande por e-mail, não ponha no servid
 
 ### 2. Preparar o servidor
 
-Entre pelo console web da Hostinger (ou `ssh root@31.97.128.229`), mande o
-`bootstrap.sh` para lá e rode com a **pública** como argumento:
-
 ```sh
 bash bootstrap.sh "$(cat ~/.ssh/avexa_deploy.pub)"
 ```
 
-Ele instala Docker, cria o usuário `avexa`, abre 22/80/443 no firewall, liga o
-fail2ban e gera `/opt/avexa/app/.env` com `APP_SECRET` e senha de banco novos.
-Pode rodar de novo quando quiser: nada é refeito nem sobrescrito — em especial o
-`.env`, porque segredo sobrescrito é integração quebrada em todos os clientes.
+Cria o usuário, os diretórios, o `.env` com `APP_SECRET` e senha de banco novos,
+e instala o Docker **se não houver**. Pode rodar de novo quando quiser: nada é
+refeito nem sobrescrito — em especial o `.env`, porque segredo sobrescrito é
+integração quebrada em todos os clientes de uma vez.
 
 > **Guarde uma cópia do `APP_SECRET`.** É a chave que cifra os refresh tokens de
 > Google, Calendly e HubSpot em repouso. Perdê-la significa cada cliente
 > reconectar tudo à mão.
+
+Para ele também abrir 80/443 num ufw **que já esteja ativo**, acrescente
+`--firewall`. Se o ufw estiver desligado, ele se recusa a ligar e mostra o que
+está escutando — ligar firewall em máquina com serviço rodando é o jeito mais
+rápido de derrubar algo que ninguém lembrava.
 
 ### 3. Secrets no GitHub
 
@@ -44,38 +81,66 @@ Em **Settings › Secrets and variables › Actions**:
 | --- | --- |
 | `VPS_HOST` | `31.97.128.229` |
 | `VPS_USER` | `avexa` |
-| `VPS_SSH_KEY` | conteúdo de `~/.ssh/avexa_deploy` (a privada, inteira, com as linhas `BEGIN`/`END`) |
+| `VPS_SSH_KEY` | conteúdo de `~/.ssh/avexa_deploy` (a privada, inteira, com `BEGIN`/`END`) |
+
+O workflow usa um *environment* chamado `producao`, criado sozinho na primeira
+execução. Não muda nada hoje; existe para o dia em que você quiser exigir
+aprovação antes de um deploy.
 
 ### 4. DNS
-
-Dois registros `A` apontando para `31.97.128.229`:
 
 ```
 app.avexa.global     A    31.97.128.229
 hooks.avexa.global   A    31.97.128.229
 ```
 
-O Caddy pede o certificado sozinho no primeiro acesso. Se o DNS ainda não
-propagou, o certificado falha e o painel responde erro de TLS — espere e rode o
-deploy de novo, não há nada a consertar.
+## Atrás de um proxy que já existe (`PERFIL_PROXY=externo`)
 
-O workflow usa um *environment* do GitHub chamado `producao`, criado sozinho na
-primeira execução. Ele não muda nada hoje; existe para o dia em que você quiser
-exigir aprovação de alguém antes de um deploy.
+O Avexa escuta em `127.0.0.1:3001`. Aponte o proxy da máquina para lá. Com
+nginx, este trecho **foi testado** e entrega os caminhos certos:
+
+```nginx
+server {
+  server_name app.avexa.global;
+  location / {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  server_name hooks.avexa.global;
+  # A URL que o cliente recebe é /v1/<cliente>/<fluxo>; a rota real é
+  # /api/hooks/v1/<cliente>/<fluxo>. Sem esta reescrita, TODO lead dá 404 —
+  # e ninguém descobre até o primeiro formulário disparar.
+  location /v1/ {
+    proxy_pass http://127.0.0.1:3001/api/hooks/v1/;
+    proxy_set_header Host $host;
+  }
+  location /api/webhooks/ {
+    proxy_pass http://127.0.0.1:3001/api/webhooks/;
+    proxy_set_header Host $host;
+  }
+}
+```
+
+A barra no fim de `proxy_pass` é o que faz a reescrita funcionar. Sem ela o
+caminho vai errado e o resultado é 404 em tudo.
 
 ## Cada deploy
 
-Aba **Actions › Deploy › Run workflow**. Na primeira vez, marque **seed** para
-criar os clientes e fluxos de exemplo.
+Aba **Actions › Deploy › Run workflow**. Na primeira vez, marque **seed**.
 
-O workflow roda typecheck e testes antes de tocar no servidor, envia o código
-por `rsync`, constrói as imagens, aplica as migrações, sobe tudo e só termina
-quando `https://app.avexa.global/entrar` responde 200. Se não responder, ele
-despeja os últimos logs do `web` e do `caddy` no próprio job e falha.
+O workflow roda typecheck e testes antes de tocar no servidor, envia por
+`rsync`, constrói, migra, sobe e confere o painel **na porta de loopback** — a
+verificação é do nosso contêiner, não do proxy de terceiros. Depois ele olha o
+domínio público e, se não responder, avisa sem falhar: DNS e proxy alheio não
+são responsabilidade do deploy.
 
 ## Quando precisar mexer à mão
 
-Tudo a partir de `/opt/avexa/app`, como usuário `avexa`:
+De `/opt/avexa/app`, como `avexa`:
 
 ```sh
 compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
@@ -87,16 +152,14 @@ bash infra/deploy-remoto.sh     # o mesmo deploy, sem depender do GitHub
 compose restart worker          # depois de mexer no .env
 ```
 
-Primeiro acesso ao painel, sem Resend configurado (o link mágico não sai por
-e-mail; este comando imprime um):
+Primeiro acesso ao painel, sem Resend configurado:
 
 ```sh
 compose run --rm worker pnpm --filter @avexa/web acesso \
   rodrigo@platty.tech https://app.avexa.global
 ```
 
-O link vale 15 minutos e funciona uma vez só. Depois que o Resend estiver
-configurado isso deixa de ser necessário: o link chega por e-mail.
+O link vale 15 minutos e funciona uma vez só.
 
 ## Backup
 
@@ -104,11 +167,24 @@ O que não pode ser perdido é o volume do Postgres — leads, execuções, supr
 e os segredos cifrados das integrações:
 
 ```sh
-docker exec avexa-postgres-1 pg_dump -U avexa avexa | gzip > /opt/avexa/backups/avexa-$(date +%F).sql.gz
+docker exec avexa-postgres-1 pg_dump -U avexa avexa \
+  | gzip > /opt/avexa/backups/avexa-$(date +%F).sql.gz
 ```
 
 Vale pôr no cron e mandar para fora da máquina. Backup que mora no mesmo disco
 que o banco não é backup.
+
+## Desfazer tudo
+
+Se precisar tirar o Avexa da máquina sem tocar no resto:
+
+```sh
+cd /opt/avexa/app
+docker compose --env-file .env -f infra/docker-compose.prod.yml down   # sem -v: o banco fica
+docker volume rm avexa_dados-pg                                        # isto apaga os leads
+rm -rf /opt/avexa
+deluser avexa
+```
 
 ## O que este arranjo não tem ainda
 
@@ -123,5 +199,6 @@ Dito na cara, para ninguém descobrir no dia errado:
   comparada com uma impressão digital fixa. Para fechar isso, guarde a saída de
   `ssh-keyscan 31.97.128.229` num secret e use-a no lugar do keyscan.
 - **Build no próprio servidor.** Simples e sem registro de imagens, mas ocupa
-  CPU e RAM da máquina durante o deploy. Se começar a doer, o caminho é
-  construir no runner e publicar no GHCR.
+  CPU e RAM da máquina durante o deploy — e essa máquina é compartilhada. Se
+  começar a atrapalhar o que já roda lá, o caminho é construir no runner e
+  publicar no GHCR.

@@ -1,24 +1,38 @@
 #!/usr/bin/env bash
 #
-# Prepara o VPS para receber o Avexa. Roda como root, uma vez, e pode rodar de
-# novo sem estragar nada: tudo aqui é idempotente.
-#
-#   curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/avexa/infra/bootstrap.sh \
-#     | bash -s -- "ssh-ed25519 AAAA... deploy@avexa"
-#
-# ou, com o arquivo já no servidor:
+# Prepara o VPS para receber o Avexa **sem mexer no que já está no ar**.
 #
 #   bash bootstrap.sh "ssh-ed25519 AAAA... deploy@avexa"
 #
 # O argumento é a CHAVE PÚBLICA de deploy. A privada fica na sua máquina e no
 # secret do GitHub; ela nunca deve passar por aqui nem por chat nenhum.
+#
+# Regra deste script: ele só cria o que é nosso — usuário, diretórios, .env e,
+# se faltar, o Docker. Firewall, fail2ban e sshd são estado global da máquina, e
+# um servidor compartilhado é exatamente onde "ligar o firewall" derruba um
+# serviço que ninguém lembrava que estava ali. Essas três coisas ele analisa e
+# recomenda; mexer nelas exige --firewall e --fail2ban, explicitamente.
+#
+# É idempotente: rodar de novo não refaz nem sobrescreve nada.
 set -euo pipefail
 
-CHAVE_PUBLICA="${1:-}"
+CHAVE_PUBLICA=""
+MEXER_FIREWALL=0
+MEXER_FAIL2BAN=0
 USUARIO="${AVEXA_USER:-avexa}"
 RAIZ="/opt/avexa"
 
+for arg in "$@"; do
+  case "$arg" in
+    --firewall) MEXER_FIREWALL=1 ;;
+    --fail2ban) MEXER_FAIL2BAN=1 ;;
+    ssh-*) CHAVE_PUBLICA="$arg" ;;
+    *) echo "argumento não reconhecido: $arg" >&2; exit 1 ;;
+  esac
+done
+
 vermelho() { printf '\033[31m%s\033[0m\n' "$*"; }
+amarelo()  { printf '\033[33m%s\033[0m\n' "$*"; }
 verde()    { printf '\033[32m%s\033[0m\n' "$*"; }
 passo()    { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -30,19 +44,42 @@ if [[ -z "$CHAVE_PUBLICA" ]]; then
   echo "e passe o conteúdo de ~/.ssh/avexa_deploy.pub como argumento."
   exit 1
 fi
-[[ "$CHAVE_PUBLICA" == ssh-* ]] || { vermelho "isso não parece uma chave pública (deve começar com ssh-)"; exit 1; }
 if [[ "$CHAVE_PUBLICA" == *"PRIVATE KEY"* ]]; then
-  vermelho "isso é uma chave PRIVADA. Nunca coloque a privada no servidor."
+  vermelho "isso é uma chave PRIVADA. Nunca ponha a privada no servidor."
   exit 1
 fi
 
-passo "Pacotes do sistema"
+porta_ocupada() { ss -lntH "sport = :$1" 2>/dev/null | grep -q .; }
+dono_da_porta() { ss -lntpH "sport = :$1" 2>/dev/null | awk '{print $NF}' | head -1; }
+
+passo "O que já está nesta máquina"
+if porta_ocupada 443 || porta_ocupada 80; then
+  PERFIL_PROXY=externo
+  amarelo "Porta 80/443 já ocupada:"
+  porta_ocupada 80  && amarelo "   80  → $(dono_da_porta 80)"
+  porta_ocupada 443 && amarelo "   443 → $(dono_da_porta 443)"
+  amarelo "O Avexa vai subir SEM Caddy próprio, escutando só em 127.0.0.1."
+  amarelo "Quem já cuida do TLS continua cuidando — não vou disputar a porta."
+else
+  PERFIL_PROXY=caddy
+  verde "80 e 443 livres: o Caddy do Avexa pode cuidar do TLS."
+fi
+[[ -n "$(docker ps -aq --filter 'label=com.docker.compose.project=avexa' 2>/dev/null)" ]] &&
+  amarelo "Já existem contêineres do projeto avexa — este bootstrap não os toca."
+
+passo "Pacotes"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg ufw fail2ban rsync >/dev/null
+# Só o que o deploy precisa. Nada de instalar servidor web: se já houver um,
+# instalar outro é começar uma briga por porta.
+apt-get install -y -qq ca-certificates curl gnupg rsync openssl >/dev/null
+verde "ok"
 
 passo "Docker"
-if ! command -v docker >/dev/null; then
+if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
+  verde "já instalado ($(docker --version | awk '{print $3}' | tr -d ,)) — não mexo"
+else
+  amarelo "instalando Docker (é a única coisa global que este script instala)"
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
   chmod a+r /etc/apt/keyrings/docker.asc
@@ -50,9 +87,9 @@ if ! command -v docker >/dev/null; then
     > /etc/apt/sources.list.d/docker.list
   apt-get update -qq
   apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+  systemctl enable --now docker >/dev/null
+  verde "docker $(docker --version | awk '{print $3}' | tr -d ,)"
 fi
-systemctl enable --now docker >/dev/null
-verde "docker $(docker --version | awk '{print $3}' | tr -d ,)"
 
 passo "Usuário de deploy: $USUARIO"
 # Deploy não entra como root. O grupo docker já é acesso total à máquina, então
@@ -60,6 +97,9 @@ passo "Usuário de deploy: $USUARIO"
 # uma chave vazada não virar login de root direto.
 if ! id -u "$USUARIO" >/dev/null 2>&1; then
   adduser --disabled-password --gecos "" "$USUARIO" >/dev/null
+  verde "criado"
+else
+  verde "já existia"
 fi
 usermod -aG docker "$USUARIO"
 
@@ -76,11 +116,16 @@ chmod 600 "/home/$USUARIO/.ssh/authorized_keys"
 
 passo "Diretórios"
 install -d -m 755 -o "$USUARIO" -g "$USUARIO" "$RAIZ" "$RAIZ/app" "$RAIZ/backups"
+verde "$RAIZ — tudo do Avexa mora aqui e em lugar nenhum mais"
 
 passo "Segredos da aplicação"
 ENV="$RAIZ/app/.env"
 if [[ -f "$ENV" ]]; then
   verde "$ENV já existe — não vou tocar. Segredo sobrescrito é integração quebrada."
+  grep -q '^PERFIL_PROXY=' "$ENV" || {
+    echo "PERFIL_PROXY=$PERFIL_PROXY" >> "$ENV"
+    verde "acrescentei PERFIL_PROXY=$PERFIL_PROXY"
+  }
 else
   # APP_SECRET cifra os refresh tokens de Google, Calendly e HubSpot em repouso.
   # Trocar esta chave depois torna ilegível o que já está gravado, e cada
@@ -96,6 +141,13 @@ APP_SECRET=$APP_SECRET
 # Entra dentro da DATABASE_URL, então só hexadecimal: um @ ou um # numa senha
 # trocada à mão quebra a URL de conexão de um jeito difícil de diagnosticar.
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
+# caddy  = o Avexa sobe o próprio Caddy e cuida do TLS (portas 80/443 livres).
+# externo = já existe proxy nesta máquina; o Avexa escuta só em 127.0.0.1 e
+#           quem já manda nas portas continua mandando.
+PERFIL_PROXY=$PERFIL_PROXY
+# Porta de loopback do painel. Só 127.0.0.1 — invisível da internet.
+PORTA_WEB=3001
 ACME_EMAIL=dev@platty.tech
 
 # Preencha conforme for contratando cada fornecedor. O que ficar vazio
@@ -137,47 +189,81 @@ WORKER_CONCORRENCIA=5
 ENVFILE
   chown "$USUARIO:$USUARIO" "$ENV"
   chmod 600 "$ENV"
-  verde "$ENV criado com APP_SECRET e senha de banco novos"
+  verde "$ENV criado · PERFIL_PROXY=$PERFIL_PROXY"
 fi
 
 passo "Firewall"
-ufw allow OpenSSH >/dev/null
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
-ufw allow 443/udp >/dev/null
-ufw --force enable >/dev/null
-verde "$(ufw status | head -1) · 22, 80 e 443 abertas, o resto fechado"
+if [[ $MEXER_FIREWALL -eq 1 ]]; then
+  if ! command -v ufw >/dev/null; then
+    apt-get install -y -qq ufw >/dev/null
+  fi
+  if ufw status 2>/dev/null | head -1 | grep -q inactive; then
+    vermelho "O ufw está DESLIGADO nesta máquina e eu não vou ligar."
+    echo "   Ligar um firewall num servidor que já roda coisas é o jeito mais"
+    echo "   rápido de derrubar um serviço que ninguém lembrava. O que está"
+    echo "   escutando fora do loopback agora:"
+    ss -lntuH 2>/dev/null | awk '$5 !~ /^(127\.|\[::1\])/ {print "     " $1, $5, $NF}' | sort -u
+    echo
+    echo "   Se depois de olhar essa lista você quiser ligar, abra o que precisa"
+    echo "   ANTES de habilitar:"
+    echo "     ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw enable"
+  else
+    # Já está ligado: acrescentar regra é aditivo e não derruba nada.
+    ufw allow 80/tcp >/dev/null
+    ufw allow 443/tcp >/dev/null
+    ufw allow 443/udp >/dev/null
+    verde "ufw já estava ativo; abri 80 e 443 (aditivo, nada foi fechado)"
+  fi
+else
+  amarelo "não mexi no firewall. Para eu abrir 80/443 num ufw JÁ ativo: --firewall"
+  command -v ufw >/dev/null && amarelo "   estado atual: $(ufw status 2>/dev/null | head -1)"
+fi
 
 passo "fail2ban"
-systemctl enable --now fail2ban >/dev/null
-verde "ativo"
+if [[ $MEXER_FAIL2BAN -eq 1 ]]; then
+  apt-get install -y -qq fail2ban >/dev/null
+  systemctl enable --now fail2ban >/dev/null
+  verde "instalado e ativo"
+else
+  amarelo "não instalei. Ele começa a banir IP por falha de SSH, e num servidor"
+  amarelo "compartilhado isso pode trancar um colega. Para instalar: --fail2ban"
+fi
 
 cat <<FIM
 
-$(verde "Servidor pronto.")
+$(verde "Servidor pronto. Nada que já estava no ar foi tocado.")
 
-Próximos passos, na ordem:
+Perfil escolhido: $(amarelo "PERFIL_PROXY=$PERFIL_PROXY")
+FIM
 
-  1. No GitHub, em Settings > Secrets and variables > Actions, cadastre:
-       VPS_HOST     31.97.128.229
+if [[ "$PERFIL_PROXY" == externo ]]; then
+cat <<FIM
+   O Avexa vai escutar em 127.0.0.1:3001 e não publica mais nada. Aponte o proxy
+   que já existe para lá — com o nginx, por exemplo:
+
+     server {
+       server_name app.avexa.global;
+       location / { proxy_pass http://127.0.0.1:3001; proxy_set_header Host \$host; }
+     }
+     server {
+       server_name hooks.avexa.global;
+       # A URL que o cliente recebe é /v1/<cliente>/<fluxo>; a rota real é
+       # /api/hooks/v1/<cliente>/<fluxo>. Sem esta reescrita, todo lead dá 404.
+       location /v1/ { proxy_pass http://127.0.0.1:3001/api/hooks/v1/; proxy_set_header Host \$host; }
+       location /api/webhooks/ { proxy_pass http://127.0.0.1:3001/api/webhooks/; proxy_set_header Host \$host; }
+     }
+
+FIM
+fi
+
+cat <<FIM
+Próximos passos:
+
+  1. No GitHub, em Settings > Secrets and variables > Actions:
+       VPS_HOST     $(hostname -I | awk '{print $1}')
        VPS_USER     $USUARIO
        VPS_SSH_KEY  o conteúdo de ~/.ssh/avexa_deploy (a chave PRIVADA)
 
-  2. Rode o workflow "Deploy" pela aba Actions.
-
-  3. Depois do primeiro deploy, rode o seed uma vez:
-       cd $RAIZ/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \\
-         run --rm worker pnpm db:seed
-
-  4. Preencha $ENV com as credenciais dos fornecedores e reinicie:
-       cd $RAIZ/app && docker compose --env-file .env -f infra/docker-compose.prod.yml up -d
-
-$(vermelho "Recomendado, e não fiz por você:") desligar login por senha no SSH. Com
-a chave já cadastrada e o console web da Hostinger como porta dos fundos, o
-risco de se trancar do lado de fora é baixo — mas é a sua chamada:
-
-  sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-  sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-  systemctl reload ssh
+  2. Actions > Deploy > Run workflow, marcando "seed" na primeira vez.
 
 FIM

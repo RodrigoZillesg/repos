@@ -268,13 +268,20 @@ cliente.
 
 ## Produção
 
-Uma máquina no VPS, quatro contêineres: Postgres, painel, worker e Caddy. Só o
-Caddy fala com a internet — o banco não publica porta, e o painel também não.
+O VPS pode já estar servindo outras coisas, então o Avexa foi feito para
+conviver: contêineres, rede e volumes com prefixo `avexa`, e **nenhuma porta
+pública** por padrão — o painel escuta em `127.0.0.1:3001` e quem já cuida do
+TLS na máquina continua cuidando. Onde 80 e 443 estiverem livres, um Caddy
+próprio entra como camada opcional.
+
+Nada de firewall, fail2ban ou sshd é alterado sem pedido explícito. Ligar um
+firewall numa máquina que já roda coisas é o jeito mais rápido de derrubar um
+serviço que ninguém lembrava que estava ali.
 
 O deploy sai do GitHub Actions (`.github/workflows/deploy.yml`), manual, com
-typecheck e testes rodando antes de qualquer coisa tocar o servidor. O passo
-final só termina quando `https://app.avexa.global/entrar` responde 200; se não
-responder, o job despeja os logs do `web` e do `caddy` e falha.
+typecheck e testes rodando antes de qualquer coisa tocar o servidor, e confere
+o painel pela porta de loopback — a verificação é do nosso contêiner, não do
+proxy de terceiros.
 
 O passo a passo — chave de deploy, `infra/bootstrap.sh`, secrets, DNS — está em
 [`infra/README.md`](infra/README.md), junto com o que este arranjo **não** tem

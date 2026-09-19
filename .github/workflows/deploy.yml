@@ -74,17 +74,23 @@ jobs:
           ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
             'cd /opt/avexa/app && docker compose --env-file .env -f infra/docker-compose.prod.yml run --rm worker pnpm db:seed'
 
-      - name: Conferir se subiu
+      # O deploy-remoto.sh já conferiu o painel por dentro, na porta de
+      # loopback. Este passo olha o domínio público, que depende de DNS e do
+      # proxy da máquina — coisas que podem não ser nossas. Por isso ele AVISA
+      # em vez de falhar: derrubar um deploy que subiu bem porque o proxy de
+      # outra pessoa ainda não foi configurado seria ruído.
+      - name: Olhar o domínio público
+        continue-on-error: true
         run: |
-          # Certificado novo do Let's Encrypt demora alguns segundos no primeiro
-          # deploy; por isso a espera antes de desistir.
-          for i in $(seq 1 12); do
+          for i in $(seq 1 6); do
             codigo=$(curl -s -o /dev/null -w '%{http_code}' https://app.avexa.global/entrar || true)
-            [ "$codigo" = "200" ] && { echo "painel no ar (HTTP $codigo)"; exit 0; }
+            if [ "$codigo" = "200" ]; then
+              echo "painel no ar em https://app.avexa.global (HTTP $codigo)"
+              exit 0
+            fi
             echo "tentativa $i: HTTP $codigo"
             sleep 10
           done
-          echo "::error::o painel não respondeu 200 em https://app.avexa.global/entrar"
-          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            'cd /opt/avexa/app && docker compose --env-file .env -f infra/docker-compose.prod.yml logs --tail 60 web caddy'
-          exit 1
+          echo "::warning::o painel subiu no servidor, mas https://app.avexa.global ainda não responde 200."
+          echo "Verifique o DNS e, se a máquina já tinha um proxy, se ele aponta para 127.0.0.1:3001."
+          echo "Veja a seção 'Atrás de um proxy que já existe' em avexa/infra/README.md."
