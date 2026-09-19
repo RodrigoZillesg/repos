@@ -14,7 +14,7 @@
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @avexa/db generate",
     "db:migrate": "pnpm --filter @avexa/db migrate",
-    "db:seed": "pnpm --filter @avexa/db seed"
+    "db:seed": "pnpm --filter @avexa/servicos seed"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

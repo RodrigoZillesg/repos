@@ -38,6 +38,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
 
     pnpm --filter @avexa/worker e2e
     pnpm --filter @avexa/worker e2e:optout
+    pnpm --filter @avexa/worker e2e:ativacao
 
 ## Entrar no painel em desenvolvimento
 
@@ -54,6 +55,21 @@ A entrada de lead aceita JSON, form-urlencoded e query string, e responde 200
 com o motivo quando recusa (duplicado, lead velho, sem identificador). Um 4xx
 faria a plataforma do cliente marcar o webhook como quebrado, e "duplicado" não
 é falha de integração.
+
+## Ativação de cliente
+
+A aba "Ativar cliente" provisiona um cliente do zero: cadastra, reserva um
+número de voz do pool no país dele, liga os canais no roteamento da Avexa, cria
+a biblioteca de templates a partir dos modelos, gera os roteiros de voz, monta
+os fluxos conforme os canais contratados e devolve as URLs de entrada prontas
+para entregar. O cliente nasce em modo seco.
+
+O que fica pendente vem como aviso, não como surpresa no primeiro lead — o caso
+mais comum é o WhatsApp, cujos números são da Avexa mas cujos templates ainda
+passam pela Meta.
+
+A mesma função (`ativarCliente`) é usada pelo seed, para que o cliente de
+desenvolvimento e o cliente de verdade não divirjam.
 
 ## Simulação
 

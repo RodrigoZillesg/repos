@@ -92,3 +92,8 @@ jobs:
       # contato em outro cliente, em todos os canais.
       - name: Supressão global entre clientes
         run: pnpm --filter @avexa/worker e2e:optout
+
+      # A promessa comercial inteira: cliente novo provisionado do zero e um lead
+      # atravessando o que a ativação criou, sem ninguém tocar em DNS ou cadastro.
+      - name: Ativação de cliente
+        run: pnpm --filter @avexa/worker e2e:ativacao

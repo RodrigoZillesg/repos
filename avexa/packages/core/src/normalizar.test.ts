@@ -1,6 +1,12 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { chaveDedupe, normalizarEmail, normalizarTelefone, paisDoFuso } from './normalizar.ts'
+import {
+  chaveDedupe,
+  normalizarEmail,
+  normalizarTelefone,
+  paisDoFuso,
+  paisDoTelefone,
+} from './normalizar.ts'
 
 test('o mesmo número australiano escrito de várias formas dá a mesma chave', () => {
   const esperado = '+61412345678'
@@ -75,4 +81,14 @@ test('um número americano de 10 dígitos sobrevive quando o país está certo',
   // número vira null, e o lead chega sem telefone — sem ligação e sem SMS.
   assert.equal(normalizarTelefone('4155559876', 'US'), '+14155559876')
   assert.equal(normalizarTelefone('4155559876', 'AU'), null)
+})
+
+test('descobre o país de um número E.164 pelo DDI', () => {
+  assert.equal(paisDoTelefone('+61255500101'), 'AU')
+  assert.equal(paisDoTelefone('+14155552671'), 'US')
+  assert.equal(paisDoTelefone('+5511987654321'), 'BR')
+  // DDI de país onde não operamos: melhor não adivinhar.
+  assert.equal(paisDoTelefone('+33123456789'), null)
+  assert.equal(paisDoTelefone('0412345678'), null)
+  assert.equal(paisDoTelefone(null), null)
 })

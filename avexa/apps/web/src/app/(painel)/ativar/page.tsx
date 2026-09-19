@@ -3,6 +3,8 @@ import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
 import { listarClientes } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
+import { Ativacao } from '@/componentes/ativacao'
+import { ativar } from './acoes'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +73,10 @@ export default async function PaginaAtivar() {
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-tinta-2)]">
         {t['ativar.descricao']}
       </p>
+
+      <section className="mt-7">
+        <Ativacao podeAtivar={s.permissoes.administrar} t={t} aoAtivar={ativar} />
+      </section>
 
       <section className="mt-7">
         <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -37,6 +37,29 @@ export function paisDoFuso(fuso: string): Pais {
   return 'AU'
 }
 
+/** País de um número já em E.164, pelo DDI.
+ *
+ *  Usado para casar o número de voz com o país do cliente: ligar para um lead
+ *  americano de um número australiano derruba a taxa de atendimento e contradiz
+ *  a promessa de que o lead reconhece a origem. Devolve `null` quando o DDI não
+ *  é de um país onde operamos — melhor não adivinhar. */
+export function paisDoTelefone(e164: string | null | undefined): Pais | null {
+  if (!e164 || !e164.startsWith('+')) return null
+  const digitos = e164.slice(1)
+
+  // DDIs mais longos primeiro: '1' casaria com '55' se a ordem fosse ingênua.
+  const ordenados = (Object.entries(DDI) as Array<[Pais, (typeof DDI)[string]]>).sort(
+    (a, b) => b[1]!.codigo.length - a[1]!.codigo.length,
+  )
+  for (const [pais, def] of ordenados) {
+    if (digitos.startsWith(def!.codigo)) {
+      const resto = digitos.slice(def!.codigo.length)
+      if (def!.tamanhoNacional.includes(resto.length)) return pais
+    }
+  }
+  return null
+}
+
 /** Converte um telefone para E.164, ou devolve `null` se não der para confiar.
  *
  *  Devolver `null` é deliberado: número que não dá para normalizar com segurança

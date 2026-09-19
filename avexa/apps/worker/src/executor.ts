@@ -227,7 +227,15 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
   const decisao = podeContatar(fatos, p.limites, p.agora)
 
   if (!decisao.pode) {
-    // A tentativa bloqueada também vira registro: sem isso, "por que este lead
+    // Adiar não é tentar. Gravar uma linha a cada adiamento encheria a auditoria
+    // de falsos cancelamentos — um lead fora da janela seria "cancelado" todo
+    // dia até a janela abrir. A espera já está registrada na própria execução,
+    // com `retomarEm`.
+    if (decisao.acao === 'adiar') {
+      return { acao: 'adiar', em: decisao.adiarPara ?? p.agora }
+    }
+
+    // Bloqueio definitivo, esse sim, vira registro: sem ele, "por que este lead
     // não foi contatado?" não teria resposta no painel.
     await db.insert(tTentativa).values({
       execucaoId: p.execucaoId,
@@ -245,7 +253,6 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
     })
 
     if (decisao.acao === 'encerrar') return { acao: 'encerrar', motivo: decisao.motivo }
-    if (decisao.acao === 'adiar') return { acao: 'adiar', em: decisao.adiarPara ?? p.agora }
     return { acao: 'pular' }
   }
 

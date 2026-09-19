@@ -155,9 +155,6 @@ importers:
 
   packages/db:
     dependencies:
-      '@avexa/core':
-        specifier: workspace:*
-        version: link:../core
       drizzle-orm:
         specifier: ^0.38.3
         version: 0.38.4(@types/react@19.3.0)(pg@8.23.0)(postgres@3.4.9)(react@19.3.0)
@@ -209,6 +206,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.4
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
