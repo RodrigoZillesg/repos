@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  avexa:
+    name: Avexa — tipos e motor
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: avexa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: avexa/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tipos
+        run: pnpm -r typecheck
+
+      # O simulador roda o motor de verdade contra as cinco personas de lead, com
+      # relógio virtual e sem fornecedor nenhum. Toda alteração de fluxo ou de
+      # regra passa por aqui antes de chegar perto de um lead real.
+      - name: Motor e simulador
+        run: pnpm -r test

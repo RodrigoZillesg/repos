@@ -28,7 +28,7 @@ test('opt-out bloqueia definitivamente, sem reagendar', () => {
   const d = podeContatar({ ...base, suprimido: true }, L, AGORA)
   assert.equal(d.pode, false)
   assert.equal(d.pode === false && d.motivo, 'suprimido')
-  assert.equal(d.pode === false && d.definitivo, true)
+  assert.equal(d.pode === false && d.acao, 'encerrar')
   assert.equal(d.pode === false && d.adiarPara, undefined)
 })
 
@@ -43,7 +43,7 @@ test('a supressão é checada antes de qualquer adiamento', () => {
 test('primeira resposta cancela o resto da sequência', () => {
   const d = podeContatar({ ...base, jaRespondeu: true }, L, AGORA)
   assert.equal(d.pode === false && d.motivo, 'ja_respondeu')
-  assert.equal(d.pode === false && d.definitivo, true)
+  assert.equal(d.pode === false && d.acao, 'encerrar')
 })
 
 test('o fluxo pode pedir menos que o teto do sistema, nunca mais', () => {
@@ -57,7 +57,7 @@ test('fora da janela, adia para a abertura em vez de bloquear', () => {
   const madrugada = new Date('2026-03-10T06:00:00Z') // 03:00 em São Paulo
   const d = podeContatar(base, L, madrugada)
   assert.equal(d.pode === false && d.motivo, 'fora_da_janela')
-  assert.equal(d.pode === false && d.definitivo, false)
+  assert.equal(d.pode === false && d.acao, 'adiar')
   assert.equal(d.pode === false && d.adiarPara?.toISOString(), '2026-03-10T12:00:00.000Z')
 })
 
@@ -68,7 +68,7 @@ test('um canal por janela: segundo disparo próximo é adiado', () => {
     AGORA,
   )
   assert.equal(d.pode === false && d.motivo, 'intervalo_minimo')
-  assert.equal(d.pode === false && d.definitivo, false)
+  assert.equal(d.pode === false && d.acao, 'adiar')
   // 10 min atrás + 60 min de intervalo = 50 min à frente, ainda dentro da janela.
   assert.equal(d.pode === false && d.adiarPara?.toISOString(), '2026-03-10T13:50:00.000Z')
 })
@@ -86,8 +86,19 @@ test('template pendente na Meta impede o envio', () => {
   assert.equal(d.pode === false && d.motivo, 'template_nao_aprovado')
 })
 
-test('canal não contratado pelo cliente não dispara', () => {
-  assert.equal(podeContatar({ ...base, canalAtivo: false }, L, AGORA).pode, false)
+test('canal não contratado pula a etapa, não encerra o fluxo', () => {
+  const d = podeContatar({ ...base, canalAtivo: false }, L, AGORA)
+  assert.equal(d.pode === false && d.acao, 'pular')
+})
+
+test('template pendente pula a etapa em vez de matar a execução', () => {
+  const d = podeContatar({ ...base, templateAprovado: false }, L, AGORA)
+  assert.equal(d.pode === false && d.acao, 'pular')
+})
+
+test('lead sem endereço naquele canal pula a etapa', () => {
+  const d = podeContatar({ ...base, destinatario: null }, L, AGORA)
+  assert.equal(d.pode === false && d.acao, 'pular')
 })
 
 test('subfluxo que volta ao ponto de partida é cortado', () => {

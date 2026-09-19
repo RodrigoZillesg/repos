@@ -25,9 +25,19 @@ export interface FatosContato {
   fusoDoLead: string
 }
 
+/** O que fazer quando o contato não pode sair agora.
+ *
+ *  As três respostas são diferentes e confundi-las custa caro: `encerrar` fecha a
+ *  execução (opt-out, resposta, teto), `pular` descarta só esta etapa e segue o
+ *  fluxo (canal desligado, template pendente, lead sem o endereço daquele canal),
+ *  e `adiar` mantém a etapa e tenta de novo mais tarde (fora da janela, intervalo
+ *  mínimo). Tratar canal desligado como encerramento mataria o fluxo inteiro por
+ *  causa de uma etapa que o cliente simplesmente não contratou. */
+export type AcaoBloqueio = 'encerrar' | 'pular' | 'adiar'
+
 export type Decisao =
   | { pode: true }
-  | { pode: false; motivo: MotivoBloqueio; adiarPara?: Date; definitivo: boolean }
+  | { pode: false; motivo: MotivoBloqueio; acao: AcaoBloqueio; adiarPara?: Date }
 
 /** As seis regras que o motor aplica sozinho, na ordem em que importam.
  *
@@ -36,22 +46,24 @@ export type Decisao =
  *  para sempre um contato que nunca poderia sair. */
 export function podeContatar(f: FatosContato, l: LimitesMotor, agora: Date): Decisao {
   // 3. Opt-out vale em tudo — todos os canais, todos os clientes, para sempre.
-  if (f.suprimido) return { pode: false, motivo: 'suprimido', definitivo: true }
+  if (f.suprimido) return { pode: false, motivo: 'suprimido', acao: 'encerrar' }
 
   // 2. Parada na primeira resposta — respondeu em qualquer canal, cancela o resto.
-  if (f.jaRespondeu) return { pode: false, motivo: 'ja_respondeu', definitivo: true }
+  if (f.jaRespondeu) return { pode: false, motivo: 'ja_respondeu', acao: 'encerrar' }
 
-  if (!f.canalAtivo) return { pode: false, motivo: 'canal_desligado', definitivo: true }
-  if (!f.destinatario) return { pode: false, motivo: 'sem_destinatario', definitivo: true }
+  // Canal que o cliente não contratou e lead sem endereço naquele canal não são
+  // erro: a etapa é pulada e o fluxo continua pelas outras.
+  if (!f.canalAtivo) return { pode: false, motivo: 'canal_desligado', acao: 'pular' }
+  if (!f.destinatario) return { pode: false, motivo: 'sem_destinatario', acao: 'pular' }
 
   // 5. Teto de tentativas — o fluxo pode pedir menos que o sistema, nunca mais.
   const teto = Math.min(l.tetoTentativas, f.tetoDoFluxo ?? l.tetoTentativas)
   if (f.tentativasFeitas >= teto) {
-    return { pode: false, motivo: 'teto_de_tentativas', definitivo: true }
+    return { pode: false, motivo: 'teto_de_tentativas', acao: 'encerrar' }
   }
 
   if (f.templateAprovado === false) {
-    return { pode: false, motivo: 'template_nao_aprovado', definitivo: true }
+    return { pode: false, motivo: 'template_nao_aprovado', acao: 'pular' }
   }
 
   // 1. Um canal por janela — nunca dois disparos para a mesma pessoa na mesma
@@ -62,8 +74,8 @@ export function podeContatar(f: FatosContato, l: LimitesMotor, agora: Date): Dec
       return {
         pode: false,
         motivo: 'intervalo_minimo',
+        acao: 'adiar',
         adiarPara: proximaJanela(liberaEm, f.fusoDoLead, l),
-        definitivo: false,
       }
     }
   }
@@ -73,8 +85,8 @@ export function podeContatar(f: FatosContato, l: LimitesMotor, agora: Date): Dec
     return {
       pode: false,
       motivo: 'fora_da_janela',
+      acao: 'adiar',
       adiarPara: proximaJanela(agora, f.fusoDoLead, l),
-      definitivo: false,
     }
   }
 
