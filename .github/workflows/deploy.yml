@@ -95,14 +95,14 @@ jobs:
         continue-on-error: true
         run: |
           for i in $(seq 1 6); do
-            codigo=$(curl -s -o /dev/null -w '%{http_code}' https://app.avexa.global/entrar || true)
+            codigo=$(curl -s -o /dev/null -w '%{http_code}' https://new.avexa.global/entrar || true)
             if [ "$codigo" = "200" ]; then
-              echo "painel no ar em https://app.avexa.global (HTTP $codigo)"
+              echo "painel no ar em https://new.avexa.global (HTTP $codigo)"
               exit 0
             fi
             echo "tentativa $i: HTTP $codigo"
             sleep 10
           done
-          echo "::warning::o painel subiu no servidor, mas https://app.avexa.global ainda não responde 200."
-          echo "Verifique o DNS e, se a máquina já tinha um proxy, se ele aponta para 127.0.0.1:3001."
+          echo "::warning::o painel subiu no servidor, mas https://new.avexa.global ainda não responde 200."
+          echo "Confira o registro A de new.avexa.global e se o vhost já foi publicado (Servidor > publicar)."
           echo "Veja a seção 'Atrás de um proxy que já existe' em avexa/infra/README.md."
