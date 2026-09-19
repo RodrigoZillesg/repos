@@ -37,12 +37,10 @@ const CLIENTES: EntradaAtivacao[] = [
   },
 ]
 
-const EQUIPE = [
-  { nome: 'Rodrigo', email: 'rodrigo.zillesg@platty.tech', papel: 'admin' },
-  { nome: 'Enzo', email: 'enzo@platty.tech', papel: 'operacao' },
-  { nome: 'Paulo', email: 'paulo@platty.tech', papel: 'designer' },
-  { nome: 'Sebastian', email: 'sebastian@platty.tech', papel: 'copy' },
-] as const
+// Só quem precisa entrar hoje. Conta viva sem dono é porta aberta, e o
+// padrão da casa é nome.sobrenome@platty.tech — acrescente pelo mesmo
+// formato quando houver mais gente.
+const EQUIPE = [{ nome: 'Rodrigo', email: 'rodrigo.zillesg@platty.tech', papel: 'admin' }] as const
 
 async function semear(): Promise<void> {
   const d = db()

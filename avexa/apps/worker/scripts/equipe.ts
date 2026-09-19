@@ -6,9 +6,10 @@
  *
  *      pnpm --filter @avexa/worker equipe listar
  *      pnpm --filter @avexa/worker equipe email <atual> <novo>
+ *      pnpm --filter @avexa/worker equipe remover <email>
  */
-import { eq } from 'drizzle-orm'
-import { db, usuario } from '@avexa/db'
+import { count, eq } from 'drizzle-orm'
+import { auditoria, db, usuario } from '@avexa/db'
 
 const [comando, ...resto] = process.argv.slice(2)
 const d = db()
@@ -56,5 +57,41 @@ if (comando === 'email') {
   process.exit(0)
 }
 
-console.error('uso: equipe listar | equipe email <atual> <novo>')
+if (comando === 'remover') {
+  const alvoEmail = normalizar(resto[0] ?? '')
+  if (!alvoEmail.includes('@')) {
+    console.error('uso: pnpm --filter @avexa/worker equipe remover <email>')
+    process.exit(1)
+  }
+
+  const [alvo] = await d.select().from(usuario).where(eq(usuario.email, alvoEmail)).limit(1)
+  if (!alvo) {
+    console.error(`nenhum usuário com o e-mail ${alvoEmail}`)
+    process.exit(1)
+  }
+
+  // A trilha de auditoria é o que prova que a separação de papéis foi
+  // cumprida — papel designer e copywriter não veem dado de lead. Apagar o
+  // usuário põe `usuarioId` em null e transforma "o Fulano publicou isso" em
+  // "alguém publicou isso". Quem já agiu é desativado, não apagado.
+  const [linha] = await d
+    .select({ n: count() })
+    .from(auditoria)
+    .where(eq(auditoria.usuarioId, alvo.id))
+  const acoes = linha?.n ?? 0
+
+  if (acoes > 0) {
+    await d.update(usuario).set({ ativo: false }).where(eq(usuario.id, alvo.id))
+    console.log(`${alvo.nome} desativado (tem ${acoes} ação na auditoria, então não se apaga)`)
+    console.log('sem acesso ao painel: o pedido de link ignora usuário inativo')
+    process.exit(0)
+  }
+
+  // Sessões e tokens saem em cascata junto.
+  await d.delete(usuario).where(eq(usuario.id, alvo.id))
+  console.log(`${alvo.nome} <${alvoEmail}> removido`)
+  process.exit(0)
+}
+
+console.error('uso: equipe listar | equipe email <atual> <novo> | equipe remover <email>')
 process.exit(1)

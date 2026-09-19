@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, equipe, trocar-email, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -383,6 +383,21 @@ jobs:
              '${{ inputs.email_atual }}' '${{ inputs.email }}'"
 
           echo "== equipe depois da troca =="
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker equipe listar"
+
+      # Tira alguém do painel. Quem já agiu é desativado em vez de apagado: a
+      # trilha de auditoria é o que prova que a separação de papéis foi
+      # cumprida, e apagar o usuário a transforma em "alguém fez isso".
+      - name: Remover um usuário
+        if: inputs.acao == 'remover-usuario'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker equipe remover '${{ inputs.email }}'"
+
+          echo "== equipe agora =="
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker equipe listar"
