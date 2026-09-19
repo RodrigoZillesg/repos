@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { chaveDedupe, normalizarEmail, normalizarTelefone } from './normalizar.ts'
+import { chaveDedupe, normalizarEmail, normalizarTelefone, paisDoFuso } from './normalizar.ts'
 
 test('o mesmo número australiano escrito de várias formas dá a mesma chave', () => {
   const esperado = '+61412345678'
@@ -59,4 +59,20 @@ test('e-mail malformado devolve null', () => {
 test('a chave de dedupe prefere telefone a e-mail', () => {
   assert.equal(chaveDedupe('c1', 'f1', '+61412345678', 'a@b.com'), 'c1:f1:+61412345678')
   assert.equal(chaveDedupe('c1', 'f1', null, 'a@b.com'), 'c1:f1:a@b.com')
+})
+
+test('adivinha o país a partir do fuso, para o cadastro de cliente', () => {
+  assert.equal(paisDoFuso('Australia/Sydney'), 'AU')
+  assert.equal(paisDoFuso('America/Los_Angeles'), 'US')
+  assert.equal(paisDoFuso('America/New_York'), 'US')
+  assert.equal(paisDoFuso('America/Sao_Paulo'), 'BR')
+  assert.equal(paisDoFuso('America/Toronto'), 'CA')
+  assert.equal(paisDoFuso('Europe/London'), 'GB')
+})
+
+test('um número americano de 10 dígitos sobrevive quando o país está certo', () => {
+  // O caso que motivou a coluna `pais` no cliente: com padrão australiano este
+  // número vira null, e o lead chega sem telefone — sem ligação e sem SMS.
+  assert.equal(normalizarTelefone('4155559876', 'US'), '+14155559876')
+  assert.equal(normalizarTelefone('4155559876', 'AU'), null)
 })

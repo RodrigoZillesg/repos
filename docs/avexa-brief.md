@@ -116,6 +116,9 @@ Ninguém tem lista própria.
 | Local no repo | Pasta `avexa/` dentro de `RodrigoZillesg/repos` |
 | Autenticação | Link mágico por e-mail via Resend, para equipe e cliente |
 | Idioma | Painel bilíngue PT/EN desde o começo |
+| Interface | shadcn/ui + Tailwind, reinterpretando o artefato |
+| Simulador | Entra no produto e também roda como teste em CI |
+| País do cliente | Coluna própria, não inferida do fuso a cada lead |
 | Escala alvo | 10-20 clientes, alguns milhares de leads/mês |
 | Limites do motor | Configuração global editável pelo admin, com defaults conservadores |
 | Transição | Do zero, sem migração. Corte seco: os três clientes passam juntos na virada |

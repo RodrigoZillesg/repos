@@ -90,7 +90,7 @@ export async function ingerirLead(
   const entradaEtapa = etapaEm(grafo, [{ indice: 0 }])
   const cfgEntrada = entradaEtapa?.tipo === 'entrada' ? entradaEtapa.cfg : {}
 
-  const pais = (cli.fusoHorario.startsWith('America/Sao') ? 'BR' : 'AU') as Pais
+  const pais = cli.pais as Pais
   const telefone = normalizarTelefone(acharCampo(entrada.dados, NOMES_TELEFONE), pais)
   const email = normalizarEmail(acharCampo(entrada.dados, NOMES_EMAIL))
   if (!telefone && !email) return { aceito: false, motivo: 'sem_identificador' }

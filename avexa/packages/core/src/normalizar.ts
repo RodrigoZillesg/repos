@@ -17,6 +17,26 @@ const DDI: Record<string, { codigo: string; tamanhoNacional: number[] }> = {
 
 export type Pais = keyof typeof DDI
 
+/** País provável de um fuso horário.
+ *
+ *  Serve só como palpite inicial ao cadastrar um cliente — o país fica gravado
+ *  no cliente e é ele que manda depois. Inferir a cada lead seria frágil: um
+ *  cliente em `America/Los_Angeles` receberia números tratados como
+ *  australianos, e um telefone de 10 dígitos simplesmente não existe na
+ *  Austrália, então o lead chegaria sem telefone nenhum. */
+export function paisDoFuso(fuso: string): Pais {
+  if (fuso.startsWith('Australia/')) return 'AU'
+  if (fuso.startsWith('Europe/London')) return 'GB'
+  if (fuso.startsWith('America/Sao_Paulo') || fuso.startsWith('America/Fortaleza')) return 'BR'
+  if (fuso.startsWith('America/Bahia') || fuso.startsWith('America/Recife')) return 'BR'
+  if (fuso.startsWith('America/Manaus') || fuso.startsWith('America/Belem')) return 'BR'
+  if (fuso.startsWith('America/Toronto') || fuso.startsWith('America/Vancouver')) return 'CA'
+  if (fuso.startsWith('America/Edmonton') || fuso.startsWith('America/Winnipeg')) return 'CA'
+  if (fuso.startsWith('America/') || fuso.startsWith('US/')) return 'US'
+  if (fuso.startsWith('Pacific/Auckland')) return 'AU'
+  return 'AU'
+}
+
 /** Converte um telefone para E.164, ou devolve `null` se não der para confiar.
  *
  *  Devolver `null` é deliberado: número que não dá para normalizar com segurança

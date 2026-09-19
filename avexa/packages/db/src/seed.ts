@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
+import { paisDoFuso } from '@avexa/core'
 import { db } from './index.ts'
 import {
   cliente,
@@ -137,7 +138,14 @@ async function semear(): Promise<void> {
   for (const c of CLIENTES) {
     const [cli] = await d
       .insert(cliente)
-      .values({ slug: c.slug, nome: c.nome, setor: c.setor, fusoHorario: c.fuso, status: 'ativo' })
+      .values({
+        slug: c.slug,
+        nome: c.nome,
+        setor: c.setor,
+        fusoHorario: c.fuso,
+        pais: paisDoFuso(c.fuso),
+        status: 'ativo',
+      })
       .onConflictDoNothing()
       .returning({ id: cliente.id })
     if (!cli) continue

@@ -39,6 +39,22 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
     pnpm --filter @avexa/worker e2e
     pnpm --filter @avexa/worker e2e:optout
 
+## Entrar no painel em desenvolvimento
+
+Sem Resend configurado, o link mágico não sai por e-mail. Este comando gera um:
+
+    pnpm --filter @avexa/web acesso rodrigo@platty.tech
+
+## Rotas públicas
+
+    POST|GET  /api/hooks/v1/<cliente>/<fluxo>   entrada de lead
+    POST      /api/webhooks/<canal>             retorno do fornecedor
+
+A entrada de lead aceita JSON, form-urlencoded e query string, e responde 200
+com o motivo quando recusa (duplicado, lead velho, sem identificador). Um 4xx
+faria a plataforma do cliente marcar o webhook como quebrado, e "duplicado" não
+é falha de integração.
+
 ## Modo seco
 
 Todo cliente nasce com `dry_run` ligado: o fluxo roda por inteiro, cada

@@ -21,7 +21,10 @@ const amb: Ambiente = {
   agora: () => relogio,
 }
 
-const TELEFONE = '0412 999 888'
+// Em formato internacional de propósito: International House é AU e
+// LanguageBird é US, e um número local só seria válido em um dos dois. O que se
+// quer provar aqui é a supressão atravessando clientes, não a normalização.
+const TELEFONE = '+61 412 999 888'
 
 // 1. Lead entra pelo International House e recebe o primeiro contato.
 const a = await ingerirLead(
@@ -74,8 +77,16 @@ for (const t of segundas) {
 }
 console.log(`   execução: ${exB!.estado} · ${exB!.motivoEncerramento}`)
 
+// Duas asserções, não uma. "Nenhum contato saiu" sozinho passaria se o lead
+// tivesse chegado sem telefone — o motor pularia a etapa e o teste ficaria
+// verde sem provar nada sobre supressão.
 const enviou = segundas.some((t) => t.estado === 'enviada')
+const suprimiu = segundas.some((t) => t.estado === 'suprimida' && t.motivo === 'suprimido')
+
 console.log('')
-console.log(enviou ? '❌ FALHOU: saiu contato para quem pediu para parar' : '✅ nenhum contato saiu')
+if (enviou) console.log('❌ FALHOU: saiu contato para quem pediu para parar')
+else if (!suprimiu) console.log('❌ FALHOU: nada saiu, mas não foi a supressão que barrou')
+else console.log('✅ barrado pela supressão global, em outro cliente')
+
 await encerrarFila()
-process.exit(enviou ? 1 : 0)
+process.exit(enviou || !suprimiu ? 1 : 0)

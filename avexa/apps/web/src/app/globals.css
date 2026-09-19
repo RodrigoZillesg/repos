@@ -1,0 +1,70 @@
+@import 'tailwindcss';
+
+/* Identidade do Avexa.
+   Reinterpretação do artefato em tokens: fundo quase neutro com um leve desvio
+   frio, acento em índigo e uma cor por canal — as cores de canal não são
+   decorativas, são o que deixa um fluxo legível de relance. */
+@theme {
+  --color-fundo: oklch(99% 0.002 260);
+  --color-superficie: oklch(100% 0 0);
+  --color-borda: oklch(92% 0.004 260);
+  --color-tinta: oklch(22% 0.01 260);
+  --color-tinta-2: oklch(45% 0.008 260);
+  --color-tinta-3: oklch(62% 0.006 260);
+  --color-acento: oklch(54% 0.18 274);
+  --color-acento-suave: oklch(96% 0.02 274);
+
+  --color-canal-ligacao: oklch(62% 0.17 28);
+  --color-canal-whatsapp: oklch(62% 0.15 155);
+  --color-canal-sms: oklch(66% 0.15 75);
+  --color-canal-email: oklch(58% 0.16 255);
+  --color-logica: oklch(58% 0.06 280);
+  --color-ia: oklch(58% 0.16 310);
+  --color-hook: oklch(58% 0.1 200);
+  --color-ok: oklch(58% 0.14 150);
+  --color-alerta: oklch(60% 0.19 28);
+
+  --radius-cartao: 0.75rem;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema='claro']) {
+    --color-fundo: oklch(17% 0.012 265);
+    --color-superficie: oklch(21% 0.013 265);
+    --color-borda: oklch(29% 0.014 265);
+    --color-tinta: oklch(95% 0.004 265);
+    --color-tinta-2: oklch(76% 0.008 265);
+    --color-tinta-3: oklch(60% 0.008 265);
+    --color-acento: oklch(70% 0.15 274);
+    --color-acento-suave: oklch(28% 0.04 274);
+  }
+}
+
+:root[data-tema='escuro'] {
+  --color-fundo: oklch(17% 0.012 265);
+  --color-superficie: oklch(21% 0.013 265);
+  --color-borda: oklch(29% 0.014 265);
+  --color-tinta: oklch(95% 0.004 265);
+  --color-tinta-2: oklch(76% 0.008 265);
+  --color-tinta-3: oklch(60% 0.008 265);
+  --color-acento: oklch(70% 0.15 274);
+  --color-acento-suave: oklch(28% 0.04 274);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-borda);
+  }
+  body {
+    background: var(--color-fundo);
+    color: var(--color-tinta);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Foco visível em tudo que é operável: metade do time trabalha por teclado. */
+  :focus-visible {
+    outline: 2px solid var(--color-acento);
+    outline-offset: 2px;
+  }
+}

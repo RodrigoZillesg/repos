@@ -1,0 +1,1 @@
+ALTER TABLE "cliente" ADD COLUMN "pais" text DEFAULT 'AU' NOT NULL;

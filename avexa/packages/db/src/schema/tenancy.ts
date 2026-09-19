@@ -21,6 +21,11 @@ export const cliente = pgTable(
     nome: text().notNull(),
     setor: text(),
     fusoHorario: text().notNull().default('Australia/Sydney'),
+    /** País do cliente, em ISO-3166 alfa-2. Decide como um telefone sem DDI é
+     *  normalizado. Fica gravado em vez de inferido do fuso a cada lead: um
+     *  cliente em America/Los_Angeles tratado como australiano perderia o
+     *  telefone de todo lead, e com ele a ligação e o SMS. */
+    pais: text().notNull().default('AU'),
     idiomaPadrao: idiomaEnum().notNull().default('en'),
     status: clienteStatusEnum().notNull().default('ativando'),
     /** Executa fluxos por inteiro e registra tudo, sem disparar nada de verdade.
