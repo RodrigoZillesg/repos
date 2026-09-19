@@ -79,6 +79,19 @@ id avexa >/dev/null 2>&1 && nota "usuário avexa EXISTE" || nota "usuário avexa
 docker ps -a --filter 'label=com.docker.compose.project=avexa' --format '   {{.Names}}' 2>/dev/null | grep . \
   && nota "^ já há contêineres do projeto avexa" || nota "nenhum contêiner do projeto avexa"
 
+titulo "Quem já mora aqui (para não pisar em nada)"
+if [[ -d /opt/avexa/.git ]]; then
+  nota "/opt/avexa é um repositório git:"
+  git -C /opt/avexa remote -v 2>/dev/null | sed 's/^/     /' | head -4
+  nota "branch: $(git -C /opt/avexa rev-parse --abbrev-ref HEAD 2>/dev/null)"
+fi
+proxy=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -Ei 'nginx|caddy|traefik' | head -1)
+if [[ -n "$proxy" ]]; then
+  nota "proxy em contêiner: $proxy — domínios que ele já serve:"
+  docker exec "$proxy" nginx -T 2>/dev/null | grep -E '^\s*(server_name|listen|proxy_pass)' \
+    | sed 's/^[[:space:]]*/     /' | head -40
+fi
+
 titulo "Resumo"
 if ss -lntH 'sport = :443' 2>/dev/null | grep -q .; then
   nota "A porta 443 está OCUPADA → o Avexa deve subir SEM o Caddy dele,"
