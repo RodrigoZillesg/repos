@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, publicar-tls]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -167,6 +167,35 @@ jobs:
           docker exec "$proxy" nginx -s reload
           echo "vhost no ar. Os outros domínios continuam como estavam:"
           docker exec "$proxy" nginx -T 2>/dev/null | grep -E '^\s*server_name' | sort -u
+          REMOTO
+
+      # Emite o certificado pelo desafio de webroot, usando a mesma pasta que os
+      # outros vhosts desta máquina já usam. Escreve só o diretório novo em
+      # live/new.avexa.global — o certificado do admin.avexa.global não é
+      # tocado. O certbot roda em contêiner descartável: nada é instalado.
+      - name: Emitir certificado
+        if: inputs.acao == 'certificado'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          dominio=new.avexa.global
+
+          # Confere o desafio ANTES de gastar uma tentativa no Let's Encrypt:
+          # errar aqui várias vezes leva a bloqueio por hora.
+          mkdir -p /srv/avexa/nginx/certbot/www/.well-known/acme-challenge
+          echo "avexa-motor-ok" > /srv/avexa/nginx/certbot/www/.well-known/acme-challenge/teste-avexa
+          resposta=$(curl -s --max-time 15 "http://$dominio/.well-known/acme-challenge/teste-avexa" || true)
+          rm -f /srv/avexa/nginx/certbot/www/.well-known/acme-challenge/teste-avexa
+          if [ "$resposta" != "avexa-motor-ok" ]; then
+            echo "::error::o desafio ACME não é servido em http://$dominio (veio: '$resposta')"
+            exit 1
+          fi
+          echo "desafio ACME acessível"
+
+          docker run --rm             -v /srv/avexa/nginx/certbot/conf:/etc/letsencrypt             -v /srv/avexa/nginx/certbot/www:/var/www/certbot             certbot/certbot certonly --webroot -w /var/www/certbot             -d "$dominio" --email dev@platty.tech             --agree-tos --no-eff-email --non-interactive
+
+          echo "== certificados agora =="
+          ls -1 /srv/avexa/nginx/certbot/conf/live/
           REMOTO
 
       - name: Logs
