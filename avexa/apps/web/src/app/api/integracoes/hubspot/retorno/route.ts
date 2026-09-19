@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { basePublica } from '@/lib/url'
 import { db } from '@avexa/db'
 import { concluirConexaoHubspot, lerState } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic'
  *  conectado, e o operador precisa saber o que ficou pela metade. */
 export async function GET(req: Request) {
   const url = new URL(req.url)
-  const base = url.origin
+  const base = basePublica(req.headers, req.url)
   const volta = (q: string) => NextResponse.redirect(`${base}/integracoes?${q}`)
 
   const erroProvedor = url.searchParams.get('error')

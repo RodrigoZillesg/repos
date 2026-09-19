@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { basePublica } from '@/lib/url'
 import { db } from '@avexa/db'
 import { concluirConexaoGoogle, lerState } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic'
  *  código próprio e conectar a conta errada ao cliente errado. */
 export async function GET(req: Request) {
   const url = new URL(req.url)
-  const base = url.origin
+  const base = basePublica(req.headers, req.url)
   const volta = (q: string) => NextResponse.redirect(`${base}/integracoes?${q}`)
 
   const erroProvedor = url.searchParams.get('error')

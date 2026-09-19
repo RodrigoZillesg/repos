@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { consumirToken } from '@/lib/auth'
+import { basePublica } from '@/lib/url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic'
  *  token que sobrevivesse a isso já teria sido gasto por um robô. */
 export async function GET(req: Request) {
   const token = new URL(req.url).searchParams.get('t')
-  const base = new URL(req.url).origin
+  const base = basePublica(req.headers, req.url)
 
   if (!token || !(await consumirToken(token))) {
     return NextResponse.redirect(`${base}/entrar?erro=1`)

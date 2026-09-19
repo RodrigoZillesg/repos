@@ -6,6 +6,7 @@ import {
   type TipoGoogle,
 } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
+import { basePublica } from '@/lib/url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
  *  servidor, antes de qualquer redirecionamento. */
 export async function GET(req: Request) {
   const s = await sessaoAtual()
-  const base = new URL(req.url).origin
+  const base = basePublica(req.headers, req.url)
   const volta = (q: string) => NextResponse.redirect(`${base}/integracoes?${q}`)
 
   if (!s?.permissoes.administrar) return volta('erro=sem-permissao')
