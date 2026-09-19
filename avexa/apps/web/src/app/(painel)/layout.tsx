@@ -20,6 +20,7 @@ export default async function LayoutPainel({ children }: { children: React.React
     { href: '/fluxos', rotulo: t('nav.fluxos'), visivel: s.permissoes.verFluxos },
     { href: '/templates', rotulo: t('nav.templates'), visivel: s.permissoes.templates.length > 0 },
     { href: '/leads', rotulo: t('nav.leads'), visivel: s.permissoes.verLeads },
+    { href: '/monitor', rotulo: t('nav.monitor'), visivel: s.permissoes.verFluxos },
     { href: '/arquitetura', rotulo: t('nav.arquitetura'), visivel: s.permissoes.verFluxos },
   ].filter((a) => a.visivel)
 

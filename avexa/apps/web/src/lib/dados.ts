@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte } from 'drizzle-orm'
 import {
   cliente,
   clienteCanal,
@@ -8,6 +8,7 @@ import {
   fluxo,
   fluxoVersao,
   lead,
+  supressao,
   template,
   tentativa,
 } from '@avexa/db'
@@ -146,4 +147,156 @@ export async function tentativasDoLead(s: Sessao, leadId: string) {
   if (s.permissoes.escopoCliente && l.clienteId !== s.clienteId) return []
 
   return d.select().from(tentativa).where(eq(tentativa.leadId, leadId)).orderBy(tentativa.criadoEm)
+}
+
+/* ---------------------------------------------------------------------------
+ * Monitor de qualidade
+ *
+ * As perguntas que o monitor existe para responder não são "quantos leads" —
+ * são "está saindo contato?", "o que está barrando?" e "tem lead parado?".
+ * Este produto falha calado: um fluxo que pula WhatsApp em todo lead porque o
+ * template não foi aprovado não gera erro nenhum, só silêncio.
+ * ------------------------------------------------------------------------- */
+
+export interface ResumoMonitor {
+  dias: number
+  kpis: {
+    leads: number
+    contatos: number
+    respostas: number
+    entregues: number
+    suprimidosTotal: number
+  }
+  porCanal: Array<{
+    canal: string
+    tentativas: number
+    entregues: number
+    respondidas: number
+    falhas: number
+  }>
+  /** Contatos por dia e por canal, para as pequenas séries. */
+  serie: Array<{ dia: string; ligacao: number; whatsapp: number; sms: number; email: number }>
+  bloqueios: Array<{ motivo: string; n: number }>
+  paradas: Array<{ id: string; lead: string; fluxo: string; retomarEm: Date | null }>
+  falhas: Array<{ canal: string; provedor: string | null; erro: string | null; quando: Date | null }>
+}
+
+const CANAIS_MONITOR = ['ligacao', 'whatsapp', 'sms', 'email'] as const
+
+export async function resumoMonitor(
+  s: Sessao,
+  clienteId: string,
+  dias = 14,
+): Promise<ResumoMonitor> {
+  const d = db()
+  const desde = new Date(Date.now() - dias * 86_400_000)
+  const alvo = s.permissoes.escopoCliente ? (s.clienteId ?? clienteId) : clienteId
+
+  const [tentativas, leadsRecebidos, execucoesParadas, suprimidos] = await Promise.all([
+    d
+      .select({
+        canal: tentativa.canal,
+        estado: tentativa.estado,
+        motivo: tentativa.motivo,
+        provedor: tentativa.provedor,
+        erro: tentativa.erro,
+        criadoEm: tentativa.criadoEm,
+        executadaEm: tentativa.executadaEm,
+        respondidaEm: tentativa.respondidaEm,
+      })
+      .from(tentativa)
+      .where(and(eq(tentativa.clienteId, alvo), gte(tentativa.criadoEm, desde))),
+    d
+      .select({ id: lead.id })
+      .from(lead)
+      .where(and(eq(lead.clienteId, alvo), gte(lead.criadoEm, desde))),
+    d
+      .select({
+        id: execucao.id,
+        retomarEm: execucao.retomarEm,
+        leadNome: lead.nome,
+        leadEmail: lead.email,
+        fluxoNome: fluxo.nome,
+      })
+      .from(execucao)
+      .innerJoin(lead, eq(lead.id, execucao.leadId))
+      .innerJoin(fluxo, eq(fluxo.id, execucao.fluxoId))
+      .where(and(eq(execucao.clienteId, alvo), eq(execucao.estado, 'aguardando')))
+      .orderBy(execucao.retomarEm)
+      .limit(25),
+    d.select({ id: supressao.id }).from(supressao),
+  ])
+
+  const respondeu = (t: (typeof tentativas)[number]) => t.respondidaEm !== null
+
+  /** O dia que conta é o do envio, não o da criação da linha: uma tentativa
+   *  adiada pela janela nasce num dia e dispara em outro. */
+  const quando = (t: (typeof tentativas)[number]) => t.executadaEm ?? t.criadoEm
+
+  // Tabela e gráfico precisam concordar, então os dois usam a mesma base de data
+  // e a mesma janela. Filtrar um por criação e o outro por envio produziria
+  // "1 saiu" ao lado de "nenhum contato saiu" na mesma tela.
+  const saiu = (t: (typeof tentativas)[number]) =>
+    ['enviada', 'entregue', 'lida', 'respondida'].includes(t.estado) && quando(t) >= desde
+
+  const porCanal = CANAIS_MONITOR.map((canal) => {
+    const linhas = tentativas.filter((t) => t.canal === canal)
+    return {
+      canal,
+      tentativas: linhas.filter(saiu).length,
+      entregues: linhas.filter((t) => ['entregue', 'lida', 'respondida'].includes(t.estado)).length,
+      respondidas: linhas.filter(respondeu).length,
+      falhas: linhas.filter((t) => t.estado === 'falhou').length,
+    }
+  })
+
+  // Uma linha por dia, inclusive os dias sem contato: um buraco no meio da série
+  // é informação, e omitir o dia o esconderia.
+  const serie: ResumoMonitor['serie'] = []
+  for (let i = dias - 1; i >= 0; i--) {
+    const dia = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10)
+    // Indexado pelo dia em que o contato SAIU, não em que a tentativa foi
+    // criada: uma tentativa adiada pela janela nasce num dia e dispara em
+    // outro, e é o segundo que o operador está olhando.
+    const doDia = tentativas.filter((t) => saiu(t) && quando(t).toISOString().slice(0, 10) === dia)
+    serie.push({
+      dia,
+      ligacao: doDia.filter((t) => t.canal === 'ligacao').length,
+      whatsapp: doDia.filter((t) => t.canal === 'whatsapp').length,
+      sms: doDia.filter((t) => t.canal === 'sms').length,
+      email: doDia.filter((t) => t.canal === 'email').length,
+    })
+  }
+
+  const contagem = new Map<string, number>()
+  for (const t of tentativas) {
+    if (t.motivo) contagem.set(t.motivo, (contagem.get(t.motivo) ?? 0) + 1)
+  }
+
+  return {
+    dias,
+    kpis: {
+      leads: leadsRecebidos.length,
+      contatos: tentativas.filter(saiu).length,
+      respostas: tentativas.filter(respondeu).length,
+      entregues: 0,
+      suprimidosTotal: suprimidos.length,
+    },
+    porCanal,
+    serie,
+    bloqueios: [...contagem.entries()]
+      .map(([motivo, n]) => ({ motivo, n }))
+      .sort((a, b) => b.n - a.n),
+    paradas: execucoesParadas.map((e) => ({
+      id: e.id,
+      lead: e.leadNome ?? e.leadEmail ?? '—',
+      fluxo: e.fluxoNome,
+      retomarEm: e.retomarEm,
+    })),
+    falhas: tentativas
+      .filter((t) => t.estado === 'falhou' && t.erro)
+      .sort((a, b) => (b.executadaEm?.getTime() ?? 0) - (a.executadaEm?.getTime() ?? 0))
+      .slice(0, 10)
+      .map((t) => ({ canal: t.canal, provedor: t.provedor, erro: t.erro, quando: t.executadaEm })),
+  }
 }

@@ -14,9 +14,17 @@
   --color-acento: oklch(54% 0.18 274);
   --color-acento-suave: oklch(96% 0.02 274);
 
-  --color-canal-ligacao: oklch(62% 0.17 28);
-  --color-canal-whatsapp: oklch(62% 0.15 155);
-  --color-canal-sms: oklch(66% 0.15 75);
+  /* Cores de canal: paleta categórica validada, não escolhida a olho.
+     `dataviz/scripts/validate_palette.js --pairs all` passa nos seis testes nos
+     dois modos. O par crítico é verde↔laranja, em ΔE 8,0 (deuteranopia) — dentro
+     da faixa que só é legal com codificação secundária, e por isso todo ponto de
+     canal anda acompanhado do nome do canal e todo gráfico tem tabela.
+     O SMS deixou de ser âmbar: âmbar e vermelho juntos não alcançam o piso de
+     15 em visão normal sobre fundo claro, e o âmbar claro o bastante para
+     separar não alcança 3:1 de contraste. */
+  --color-canal-ligacao: oklch(60% 0.17 45);
+  --color-canal-whatsapp: oklch(58% 0.15 154);
+  --color-canal-sms: oklch(50% 0.21 340);
   --color-canal-email: oklch(58% 0.16 255);
   --color-logica: oklch(58% 0.06 280);
   --color-ia: oklch(58% 0.16 310);
@@ -38,6 +46,12 @@
     --color-tinta-3: oklch(60% 0.008 265);
     --color-acento: oklch(70% 0.15 274);
     --color-acento-suave: oklch(28% 0.04 274);
+    /* O escuro tem os próprios passos das mesmas matizes, validados contra o
+       fundo escuro — não é o claro invertido. */
+    --color-canal-ligacao: oklch(60% 0.17 45);
+    --color-canal-whatsapp: oklch(62% 0.15 154);
+    --color-canal-sms: oklch(64% 0.21 340);
+    --color-canal-email: oklch(62% 0.16 255);
   }
 }
 
@@ -50,6 +64,10 @@
   --color-tinta-3: oklch(60% 0.008 265);
   --color-acento: oklch(70% 0.15 274);
   --color-acento-suave: oklch(28% 0.04 274);
+    --color-canal-ligacao: oklch(60% 0.17 45);
+    --color-canal-whatsapp: oklch(62% 0.15 154);
+    --color-canal-sms: oklch(64% 0.21 340);
+    --color-canal-email: oklch(62% 0.16 255);
 }
 
 @layer base {

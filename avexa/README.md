@@ -80,6 +80,29 @@ uma das cinco personas de lead. Nada sai: o simulador não conhece adaptador
 nenhum. O painel mostra junto o resultado da validação, separando o que impede
 de publicar do que é só aviso.
 
+## Monitor
+
+A aba Monitor responde as perguntas que este produto esconde quando falha: está
+saindo contato, o que barrou, e tem lead parado. Uma pequena série por canal na
+mesma escala de dias — um canal que some do desenho aparece marcado em vermelho,
+e um canal que o cliente não contratou diz isso em vez de mostrar um gráfico
+vazio, que são coisas diferentes.
+
+### Cores de canal
+
+A paleta categórica é validada, não escolhida a olho:
+
+    node <dataviz>/scripts/validate_palette.js \
+      "#cf5604,#a90e88,#009351,#2b7ad6" --mode light --pairs all
+
+Passa nos seis testes nos dois modos. O par crítico é verde↔laranja, a ΔE 8,0 em
+deuteranopia — dentro da faixa que só é legal com codificação secundária, e por
+isso todo ponto de canal anda com o nome do canal ao lado e toda série tem
+tabela. O SMS deixou de ser âmbar porque âmbar e vermelho não alcançam o piso de
+separação em visão normal sobre fundo claro: o âmbar claro o bastante para
+separar não chega a 3:1 de contraste, e o escuro o bastante para o contraste
+vira marrom.
+
 ## Modo seco
 
 Todo cliente nasce com `dry_run` ligado: o fluxo roda por inteiro, cada
