@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado]
+        options: [diagnostico, bootstrap, logs, estado, nginx]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -76,6 +76,36 @@ jobs:
           echo
           echo "--- disco ---"; df -h / | tail -1
           echo "--- memória ---"; free -h | awk '/^Mem:/ {print $3 " de " $2}'
+          REMOTO
+
+      # Como o proxy que já existe nesta máquina é montado. Precisa ser lido
+      # antes de qualquer tentativa de acrescentar um domínio: se a config vem
+      # de um volume do host, dá para somar um arquivo sem editar os deles.
+      - name: Como o nginx existente é montado
+        if: inputs.acao == 'nginx'
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -e
+          proxy=$(docker ps --format '{{.Names}}' | grep -Ei 'nginx|caddy|traefik' | head -1)
+          echo "proxy: $proxy"
+          echo
+          echo "=== montagens (de onde vem a config) ==="
+          docker inspect "$proxy" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} ({{.Mode}}){{"\n"}}{{end}}'
+          echo "=== rede do proxy ==="
+          docker inspect "$proxy" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+          echo
+          echo "=== árvore de includes ==="
+          docker exec "$proxy" sh -c 'grep -rn "include" /etc/nginx/nginx.conf | head -10'
+          echo
+          echo "=== arquivos de site ==="
+          docker exec "$proxy" sh -c 'ls -la /etc/nginx/conf.d/ 2>/dev/null; ls -la /etc/nginx/sites-enabled/ 2>/dev/null'
+          echo
+          echo "=== onde ficam os certificados ==="
+          docker exec "$proxy" sh -c 'ls -la /etc/letsencrypt/live/ 2>/dev/null || echo "sem /etc/letsencrypt no contêiner"'
+          echo
+          echo "=== quem renova o TLS ==="
+          ls -la /opt/avexa/infra 2>/dev/null | head -20
+          crontab -l 2>/dev/null | grep -i -E 'certbot|acme|renew' || echo "nada de certbot no crontab do root"
           REMOTO
 
       - name: Logs

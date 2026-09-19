@@ -21,6 +21,10 @@ MEXER_FIREWALL=0
 MEXER_FAIL2BAN=0
 USUARIO="${AVEXA_USER:-avexa}"
 RAIZ="/opt/avexa-motor"
+# Um domínio só, porque neste servidor o avexa.global já é de outro produto.
+# Trocar depois é editar o .env e o server block do nginx — nada no código
+# depende do nome.
+DOMINIO="${AVEXA_DOMINIO:-new.avexa.global}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -148,6 +152,7 @@ POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 PERFIL_PROXY=$PERFIL_PROXY
 # Porta de loopback do painel. Só 127.0.0.1 — invisível da internet.
 PORTA_WEB=3001
+DOMINIO=$DOMINIO
 ACME_EMAIL=dev@platty.tech
 
 # Preencha conforme for contratando cada fornecedor. O que ficar vazio
@@ -161,7 +166,7 @@ WHATSAPP_PHONE_NUMBER_ID=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_REMETENTE=
-TWILIO_STATUS_CALLBACK=https://hooks.avexa.global/api/webhooks/twilio
+TWILIO_STATUS_CALLBACK=https://$DOMINIO/api/webhooks/twilio
 
 VAPI_API_KEY=
 VAPI_ASSISTANT_ID=
@@ -173,18 +178,18 @@ IA_MODELO=gemini-2.5-flash
 
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=https://app.avexa.global/api/integracoes/google/retorno
+GOOGLE_REDIRECT_URI=https://$DOMINIO/api/integracoes/google/retorno
 
 CALENDLY_CLIENT_ID=
 CALENDLY_CLIENT_SECRET=
-CALENDLY_REDIRECT_URI=https://app.avexa.global/api/integracoes/calendly/retorno
+CALENDLY_REDIRECT_URI=https://$DOMINIO/api/integracoes/calendly/retorno
 CALENDLY_SIGNING_KEY=
 
 HUBSPOT_CLIENT_ID=
 HUBSPOT_CLIENT_SECRET=
-HUBSPOT_REDIRECT_URI=https://app.avexa.global/api/integracoes/hubspot/retorno
+HUBSPOT_REDIRECT_URI=https://$DOMINIO/api/integracoes/hubspot/retorno
 
-HOOKS_BASE_URL=https://hooks.avexa.global/v1
+HOOKS_BASE_URL=https://$DOMINIO/v1
 WORKER_CONCORRENCIA=5
 ENVFILE
   chown "$USUARIO:$USUARIO" "$ENV"
@@ -242,15 +247,11 @@ cat <<FIM
    que já existe para lá — com o nginx, por exemplo:
 
      server {
-       server_name app.avexa.global;
-       location / { proxy_pass http://127.0.0.1:3001; proxy_set_header Host \$host; }
-     }
-     server {
-       server_name hooks.avexa.global;
+       server_name $DOMINIO;
        # A URL que o cliente recebe é /v1/<cliente>/<fluxo>; a rota real é
        # /api/hooks/v1/<cliente>/<fluxo>. Sem esta reescrita, todo lead dá 404.
        location /v1/ { proxy_pass http://127.0.0.1:3001/api/hooks/v1/; proxy_set_header Host \$host; }
-       location /api/webhooks/ { proxy_pass http://127.0.0.1:3001/api/webhooks/; proxy_set_header Host \$host; }
+       location /     { proxy_pass http://127.0.0.1:3001;             proxy_set_header Host \$host; }
      }
 
 FIM
