@@ -237,11 +237,34 @@ A entrega é **upsert**, nunca "criar contato": por e-mail quando há e-mail (a
 propriedade única do HubSpot), por busca de telefone quando não há. O mesmo lead
 volta por reenvio e por segunda campanha, e três contatos duplicados no CRM do
 cliente é pior do que não entregar. A conversa vira nota na linha do tempo do
-contato; se o portal não concedeu o escopo de notas, o contato é gravado assim
-mesmo e o painel avisa — perder a nota não pode custar o lead.
+contato; se o portal não concedeu o escopo de engajamento, o contato é gravado
+assim mesmo e o painel avisa — perder a nota não pode custar o lead.
 
-Escopos pedidos: contatos (leitura e escrita) e esquema de contatos. Nunca um
-escopo amplo de CRM, que seria acesso à base comercial inteira do cliente.
+### A reunião também sobe
+
+Quando o lead tem horário marcado, a Avexa cria um objeto `meeting` no CRM, não
+uma data escrita dentro de uma nota. A diferença é prática: nota não entra na
+agenda de ninguém, não aparece nas atividades do dia do vendedor e não muda de
+estado quando o lead cancela.
+
+O id da reunião no HubSpot fica guardado na coluna `reuniao.crm_id`, e é o que
+faz a segunda subida ser uma **atualização**. Lead reentregue, horário remarcado
+ou reunião cancelada mexem na mesma reunião; sem isso, o vendedor acumularia uma
+reunião nova na linha do tempo a cada evento. Reunião apagada no portal (404 no
+update) é recriada — o compromisso existe e ele precisa vê-lo.
+
+O cancelamento chega pelo webhook do fornecedor de agenda, e a subida vai **pela
+fila**, não na resposta do webhook: o Calendly desiste se a gente demorar, e um
+HubSpot fora do ar não pode custar a confirmação da reunião, que já está gravada
+aqui. A chave da fila é o lead, então quem remarca duas vezes em um minuto gera
+uma subida só, com o estado final.
+
+Lead que ainda não está no CRM não gera chamada nenhuma nem registro: é o caso
+comum — o fluxo ainda não passou pela etapa de entrega.
+
+Escopos pedidos: contatos (leitura e escrita), esquema de contatos e reuniões.
+Nunca um escopo amplo de CRM, que seria acesso à base comercial inteira do
+cliente.
 
 ## Monitor
 

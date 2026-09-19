@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic'
 
 const NOME_DESTINO: Record<string, string> = {
   hubspot: 'CRM do cliente (HubSpot)',
+  hubspot_reuniao: 'Reunião no CRM',
   email_time: 'E-mail do time',
   google_sheets: 'Planilha compartilhada',
   webhook: 'Webhook do cliente',
@@ -115,7 +116,7 @@ export default async function PaginaMonitor({
           valor={String(m.kpis.entregues)}
           nota={
             falhasDeEntrega > 0
-              ? `${falhasDeEntrega} não chegaram`
+              ? `${falhasDeEntrega} entrega(s) falharam`
               : 'ao CRM, webhook, time ou planilha'
           }
           {...(falhasDeEntrega > 0 ? { tom: 'alerta' as const } : {})}

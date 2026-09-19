@@ -215,6 +215,10 @@ export const reuniao = pgTable(
     linkAgendamento: text(),
     linkEvento: text(),
     conferencia: text(),
+    /** Id da reunião no CRM do cliente. Existe para a reunião ser atualizada em
+     *  vez de recriada: lead reentregue ou horário remarcado não pode virar
+     *  duas reuniões na linha do tempo do vendedor. */
+    crmId: text(),
     motivoCancelamento: text(),
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
     confirmadaEm: timestamp({ withTimezone: true }),

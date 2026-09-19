@@ -10,6 +10,7 @@ import type {
   ReuniaoConfirmada,
 } from '@avexa/core'
 import { conexaoCalendly } from './calendly.ts'
+import { agendarReuniaoNoCrm } from './fila.ts'
 import { conexaoGoogle } from './google.ts'
 
 /** Agendamento com a ferramenta do cliente.
@@ -134,6 +135,7 @@ export async function oferecerReuniao(
       : { status: 'oferecida' as const, linkAgendamento: r.url }),
   })
 
+  if (r.tipo === 'marcado') await agendarReuniaoNoCrm(p.leadId)
   return { ...r, provedor: adaptador.provedor }
 }
 
@@ -161,6 +163,9 @@ export async function confirmarReuniao(
           ...(c.motivoCancelamento ? { motivoCancelamento: c.motivoCancelamento } : {}),
         })
         .where(eq(reuniao.id, existente.id))
+      // O CRM precisa saber do cancelamento: reunião que some da agenda do lead
+      // e continua na do vendedor é pior do que reunião nenhuma.
+      await agendarReuniaoNoCrm(existente.leadId)
       return { ok: true, leadId: existente.leadId }
     }
   }
@@ -192,6 +197,7 @@ export async function confirmarReuniao(
     })
     .where(eq(reuniao.id, oferta.r.id))
 
+  await agendarReuniaoNoCrm(oferta.r.leadId)
   return { ok: true, leadId: oferta.r.leadId }
 }
 

@@ -1,7 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
-import { entrega, integracao, reuniao, type Db, type Lead } from '@avexa/db'
-import { salvarContato, criarNota, type ContatoHubspot } from '@avexa/adapters'
+import { entrega, integracao, lead as tLead, reuniao, type Db, type Lead } from '@avexa/db'
+import {
+  criarNota,
+  salvarContato,
+  salvarReuniaoHubspot,
+  type ContatoHubspot,
+  type DesfechoReuniao,
+} from '@avexa/adapters'
 import { cifrar, decifrar } from './cripto.ts'
 import { conexaoHubspot, statusParaGravar } from './hubspot.ts'
 
@@ -18,6 +24,8 @@ import { conexaoHubspot, statusParaGravar } from './hubspot.ts'
 
 export type DestinoEntrega =
   | 'hubspot'
+  /** A reunião no CRM: entra e sai do ar sozinha, depois da entrega do lead. */
+  | 'hubspot_reuniao'
   | 'email_time'
   | 'google_sheets'
   | 'webhook'
@@ -222,6 +230,120 @@ export interface ResultadoDestino {
   aviso?: string
 }
 
+
+/** Empurra a reunião do lead para o CRM.
+ *
+ *  Roda em dois momentos, e os dois importam: junto com a entrega do lead, e de
+ *  novo quando o fornecedor de agenda avisa que o lead escolheu horário ou
+ *  cancelou. Sem o segundo, a reunião no CRM congelaria em "agendada" e o
+ *  vendedor apareceria numa conversa que o lead desmarcou ontem.
+ *
+ *  Sem contato no CRM não há o que fazer, e isso é o caso comum: o lead ainda
+ *  não passou pela etapa de entrega. Não é erro e não vira registro. */
+export async function enviarReuniaoAoCrm(
+  db: Db,
+  leadId: string,
+  contatoConhecido?: string,
+): Promise<ResultadoDestino & { pulado?: boolean }> {
+  const [l] = await db.select().from(tLead).where(eq(tLead.id, leadId)).limit(1)
+  if (!l) return { ok: false, erro: 'lead não encontrado' }
+
+  const [r] = await db
+    .select()
+    .from(reuniao)
+    .where(eq(reuniao.leadId, leadId))
+    .orderBy(desc(reuniao.criadoEm))
+    .limit(1)
+  // Reunião apenas oferecida ainda não tem horário: não há compromisso para
+  // pôr na agenda de ninguém.
+  if (!r || (r.status === 'oferecida' && !r.inicio) || !r.inicio) {
+    return { ok: true, pulado: true }
+  }
+
+  const contatoId = contatoConhecido ?? (await contatoNoCrm(db, leadId))
+  if (!contatoId) return { ok: true, pulado: true }
+
+  const conexao = await conexaoHubspot(db, l.clienteId)
+  if ('erro' in conexao) {
+    return { ok: false, erro: conexao.erro, reenviavel: !conexao.precisaReconectar }
+  }
+
+  const desfecho: DesfechoReuniao = r.status === 'cancelada' ? 'CANCELED' : 'SCHEDULED'
+  const corpo = [
+    l.resumo ?? '',
+    r.status === 'cancelada' && r.motivoCancelamento
+      ? `Cancelada pelo lead: ${r.motivoCancelamento}`
+      : '',
+    `Marcada pela Avexa (${r.provedor === 'calendly' ? 'Calendly' : 'Google Calendar'}).`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const salva = await salvarReuniaoHubspot(
+    conexao.accessToken,
+    contatoId,
+    {
+      titulo:
+        r.status === 'cancelada'
+          ? `Reunião cancelada · ${l.nome ?? l.email ?? 'lead'}`
+          : `Conversa com ${l.nome ?? l.email ?? 'lead'}`,
+      corpo,
+      inicio: r.inicio,
+      ...(r.fim ? { fim: r.fim } : {}),
+      ...(r.linkEvento ?? r.conferencia ?? r.linkAgendamento
+        ? { link: r.linkEvento ?? r.conferencia ?? r.linkAgendamento ?? undefined }
+        : {}),
+      desfecho,
+    },
+    r.crmId ?? undefined,
+  )
+
+  if (!salva.ok) {
+    await registrarEntrega(db, {
+      leadId,
+      clienteId: l.clienteId,
+      destino: 'hubspot_reuniao',
+      estado: 'falhou',
+      externoId: contatoId,
+      erro: salva.semPermissao
+        ? `o app não tem permissão de criar reunião neste portal: ${salva.erro}`
+        : salva.erro,
+    })
+    return { ok: false, erro: salva.erro, reenviavel: salva.reenviavel }
+  }
+
+  if (salva.id !== r.crmId) {
+    await db.update(reuniao).set({ crmId: salva.id }).where(eq(reuniao.id, r.id))
+  }
+
+  await registrarEntrega(db, {
+    leadId,
+    clienteId: l.clienteId,
+    destino: 'hubspot_reuniao',
+    estado: 'entregue',
+    externoId: salva.id,
+  })
+  return { ok: true, externoId: salva.id }
+}
+
+/** O id do contato no CRM vem do registro da entrega que deu certo: é o único
+ *  lugar onde ele existe do nosso lado. */
+async function contatoNoCrm(db: Db, leadId: string): Promise<string | null> {
+  const [linha] = await db
+    .select({ externoId: entrega.externoId })
+    .from(entrega)
+    .where(
+      and(
+        eq(entrega.leadId, leadId),
+        eq(entrega.destino, 'hubspot'),
+        eq(entrega.estado, 'entregue'),
+      ),
+    )
+    .orderBy(desc(entrega.criadoEm))
+    .limit(1)
+  return linha?.externoId ?? null
+}
+
 /** Grava o lead no CRM do cliente: contato com upsert e a conversa como nota. */
 export async function entregarNoHubspot(
   db: Db,
@@ -275,6 +397,15 @@ export async function entregarNoHubspot(
         ? 'O contato foi gravado, mas o app não tem permissão de criar notas neste portal.'
         : `O contato foi gravado, mas a nota falhou: ${nota.erro}`
     }
+  }
+
+  // A reunião vai junto: o vendedor abre o contato e vê o compromisso, não uma
+  // data escrita dentro de uma nota.
+  const agenda = await enviarReuniaoAoCrm(db, ld.id, r.id)
+  if (!agenda.ok) {
+    aviso = [aviso, `O contato foi gravado, mas a reunião não subiu: ${agenda.erro}`]
+      .filter(Boolean)
+      .join(' ')
   }
 
   return { ok: true, externoId: r.id, ...(aviso ? { aviso } : {}) }

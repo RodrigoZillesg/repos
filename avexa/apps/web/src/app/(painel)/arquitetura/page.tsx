@@ -33,7 +33,7 @@ const CAMADAS = [
   {
     nome: 'Entrega ao cliente',
     sub: 'onde o lead qualificado vai parar',
-    itens: ['CRM (HubSpot)', 'Webhook assinado', 'E-mail do time', 'Planilha compartilhada'],
+    itens: ['CRM (HubSpot)', 'Reunião no CRM', 'Webhook assinado', 'E-mail do time', 'Planilha compartilhada'],
     nota: 'Toda entrega deixa registro, inclusive a que não aconteceu: destino não configurado, token expirado, endpoint do cliente fora do ar. Um fluxo impecável que não entrega o lead não serviu para nada, e esse é o jeito mais silencioso de falhar.',
   },
   {

@@ -31,9 +31,10 @@ export interface PedidoEntrega {
   seco: boolean
 }
 
-/** Destinos que o nó "Entregar ao time" oferece. O webhook de saída do meio do
- *  fluxo não entra aqui: ele não depende de integração cadastrada. */
-type DestinoDoNo = Exclude<DestinoEntrega, 'webhook_saida'>
+/** Destinos que o nó "Entregar ao time" oferece, e que existem como integração
+ *  cadastrada do cliente. Listados, não derivados por exclusão: assim entra um
+ *  destino novo na lista e o compilador aponta aqui, em vez de deixar passar. */
+type DestinoDoNo = 'hubspot' | 'email_time' | 'google_sheets' | 'webhook'
 
 const DESTINO: Record<string, DestinoDoNo> = {
   'CRM do cliente': 'hubspot',

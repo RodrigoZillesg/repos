@@ -429,9 +429,10 @@ export function Integracoes(p: Props) {
           )}
         </div>
         <Ajuda>
-          O destino “CRM do cliente” grava o contato com score, resumo e etiquetas, e deixa a
-          conversa como nota na linha do tempo. O contato é atualizado, nunca duplicado: o mesmo
-          lead volta por reenvio e por segunda campanha.
+          O destino “CRM do cliente” grava o contato com score, resumo e etiquetas, deixa a conversa
+          como nota e põe a reunião marcada na agenda do vendedor. Contato e reunião são
+          atualizados, nunca duplicados: o mesmo lead volta por reenvio, e quem cancela pelo link
+          mexe na reunião que já está lá.
         </Ajuda>
 
         {!e.hubspotConfigurado && (

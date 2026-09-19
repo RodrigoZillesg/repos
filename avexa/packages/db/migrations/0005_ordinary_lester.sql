@@ -1,0 +1,1 @@
+ALTER TABLE "reuniao" ADD COLUMN "crm_id" text;

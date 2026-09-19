@@ -1,4 +1,12 @@
-import { fila, FILAS, encerrarFila, type TrabalhoAvancar, type TrabalhoEvento } from '@avexa/servicos'
+import {
+  enviarReuniaoAoCrm,
+  fila,
+  FILAS,
+  encerrarFila,
+  type TrabalhoAvancar,
+  type TrabalhoEvento,
+  type TrabalhoReuniaoCrm,
+} from '@avexa/servicos'
 import type { Canal } from '@avexa/core'
 import { ambientePadrao } from './contexto.ts'
 import { avancarExecucao } from './executor.ts'
@@ -44,6 +52,17 @@ async function principal(): Promise<void> {
   await b.work<TrabalhoEvento>(FILAS.evento, { batchSize: CONCORRENCIA }, async (trabalhos) => {
     for (const t of trabalhos) {
       await processarEvento(amb, t.data.canal as Canal, t.data.corpo, t.data.cabecalhos)
+    }
+  })
+
+  // Reunião do lead no CRM do cliente: sobe junto com a entrega e volta aqui
+  // sempre que o lead marca, remarca ou cancela pelo link.
+  await b.work<TrabalhoReuniaoCrm>(FILAS.reuniaoCrm, { batchSize: CONCORRENCIA }, async (trabalhos) => {
+    for (const t of trabalhos) {
+      const r = await enviarReuniaoAoCrm(amb.db, t.data.leadId)
+      // Falha passageira volta para a fila; definitiva já ficou registrada em
+      // `entrega`, com o motivo, e insistir não mudaria nada.
+      if (!r.ok && r.reenviavel) throw new Error(r.erro ?? 'falha ao subir a reunião')
     }
   })
 

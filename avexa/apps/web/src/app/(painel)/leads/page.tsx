@@ -65,6 +65,7 @@ export default async function PaginaLeads({
    *  para quem lê. */
   const NOME_DESTINO: Record<string, string> = {
     hubspot: 'CRM',
+    hubspot_reuniao: 'Reunião no CRM',
     email_time: 'E-mail do time',
     google_sheets: 'Planilha',
     webhook: 'Webhook',

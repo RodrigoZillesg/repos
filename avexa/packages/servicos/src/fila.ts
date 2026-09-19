@@ -13,10 +13,16 @@ export const FILAS = {
   evento: 'evento.receber',
   /** Reenvia um webhook de saída que falhou. */
   webhookSaida: 'webhook.saida',
+  /** Põe (ou atualiza) a reunião do lead no CRM do cliente. */
+  reuniaoCrm: 'crm.reuniao',
 } as const
 
 export interface TrabalhoAvancar {
   execucaoId: string
+}
+
+export interface TrabalhoReuniaoCrm {
+  leadId: string
 }
 
 export interface TrabalhoEvento {
@@ -59,6 +65,23 @@ export async function agendarAvanco(
       retryBackoff: true,
       expireInMinutes: 15,
     },
+  )
+}
+
+/** Agenda a subida da reunião ao CRM.
+ *
+ *  Pela fila, e não na resposta do webhook do fornecedor de agenda, por dois
+ *  motivos: o Calendly desiste se a gente demorar, e um HubSpot fora do ar não
+ *  pode custar a confirmação da reunião — que já está gravada aqui.
+ *
+ *  `chave` por lead: o lead que remarca duas vezes em um minuto vira uma
+ *  subida só, com o estado final. */
+export async function agendarReuniaoNoCrm(leadId: string): Promise<string | null> {
+  const b = await fila()
+  return b.send(
+    FILAS.reuniaoCrm,
+    { leadId } satisfies TrabalhoReuniaoCrm,
+    { singletonKey: leadId, retryLimit: 5, retryBackoff: true, expireInMinutes: 15 },
   )
 }
 

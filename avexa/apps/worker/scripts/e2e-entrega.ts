@@ -10,13 +10,14 @@
  *  falso: a assinatura precisa sobreviver a passar por um socket e ser conferida
  *  do outro lado, que é o que o cliente vai fazer. */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { eq } from 'drizzle-orm'
-import { cliente, db, integracao, lead as tLead } from '@avexa/db'
+import { desc, eq } from 'drizzle-orm'
+import { cliente, db, integracao, lead as tLead, reuniao } from '@avexa/db'
 import {
   concluirConexaoHubspot,
   definirWebhookDoCliente,
   encerrarFila,
   entregasDoLead,
+  enviarReuniaoAoCrm,
   ingerirLead,
   webhookDoCliente,
 } from '@avexa/servicos'
@@ -68,6 +69,10 @@ const URL_CLIENTE = `http://127.0.0.1:${porta}/avexa`
 /* --------------------------- HubSpot de mentira -------------------------- */
 
 let contatoPatch = 0
+let reuniaoCriada = 0
+let reuniaoPatch = 0
+let reuniaoAssociada: string | undefined
+let desfechoNoCrm = ''
 const chamadasHubspot: string[] = []
 const original = globalThis.fetch
 
@@ -106,6 +111,25 @@ globalThis.fetch = (async (entrada: string | URL | Request, init?: RequestInit) 
     return json({ id: 'contato-1' })
   }
   if (url.includes('/crm/v3/objects/notes')) return json({ id: 'nota-1' })
+
+  if (url.includes('/crm/v3/objects/meetings')) {
+    const corpo = JSON.parse(String(init?.body ?? '{}')) as {
+      properties?: Record<string, string>
+    }
+    if (init?.method === 'PATCH') {
+      reuniaoPatch += 1
+      desfechoNoCrm = corpo.properties?.hs_meeting_outcome ?? ''
+      return json({ id: 'reuniao-1' })
+    }
+    reuniaoCriada += 1
+    desfechoNoCrm = corpo.properties?.hs_meeting_outcome ?? ''
+    reuniaoAssociada = (
+      JSON.parse(String(init?.body ?? '{}')) as {
+        associations?: Array<{ to?: { id?: string } }>
+      }
+    ).associations?.[0]?.to?.id
+    return json({ id: 'reuniao-1' })
+  }
 
   return json({}, 404)
 }) as typeof fetch
@@ -269,6 +293,17 @@ if (!chamadasHubspot.some((x) => x.includes('/properties/contacts'))) {
   problemas.push('não criou as propriedades da Avexa na conexão')
 }
 
+// 7. Entrega no CRM: upsert, nota e a reunião que o lead já tinha marcado.
+await d.insert(reuniao).values({
+  leadId: entrada.leadId,
+  clienteId: c.id,
+  provedor: 'calendly',
+  status: 'marcada',
+  externoId: 'https://api.calendly.com/scheduled_events/S7',
+  inicio: new Date('2026-03-12T01:00:00Z'),
+  fim: new Date('2026-03-12T01:30:00Z'),
+  linkEvento: 'https://calendly.com/eventos/S7',
+})
 // 7. Entrega no CRM: upsert e nota, nunca contato novo a cada lead.
 const r7 = await entregarLead(amb, { ...pedidoBase, destino: 'CRM do cliente', seco: false })
 const reg7 = await ultima('hubspot')
@@ -279,6 +314,65 @@ if (contatoPatch !== 1) problemas.push('não usou upsert por e-mail')
 if (!chamadasHubspot.some((x) => x.includes('/objects/notes'))) problemas.push('não criou a nota')
 if (reg7?.estado !== 'entregue' || reg7.externoId !== 'contato-1') {
   problemas.push('a entrega no CRM não ficou registrada com o id do contato')
+}
+
+const regReuniao = await ultima('hubspot_reuniao')
+const [linhaReuniao] = await d
+  .select()
+  .from(reuniao)
+  .where(eq(reuniao.leadId, entrada.leadId))
+  .orderBy(desc(reuniao.criadoEm))
+  .limit(1)
+console.log(
+  `   reunião no CRM: criada=${reuniaoCriada} · desfecho=${desfechoNoCrm} · crmId=${linhaReuniao?.crmId}`,
+)
+if (reuniaoCriada !== 1) problemas.push('a reunião não subiu junto com a entrega')
+if (reuniaoAssociada !== 'contato-1') problemas.push('a reunião não foi associada ao contato')
+if (desfechoNoCrm !== 'SCHEDULED') problemas.push('a reunião não subiu como agendada')
+if (linhaReuniao?.crmId !== 'reuniao-1') problemas.push('o id da reunião no CRM não foi guardado')
+if (regReuniao?.estado !== 'entregue') problemas.push('a subida da reunião não ficou registrada')
+
+// 7b. O lead cancela: a MESMA reunião é atualizada, nunca uma segunda criada.
+await d
+  .update(reuniao)
+  .set({ status: 'cancelada', motivoCancelamento: 'Surgiu um imprevisto' })
+  .where(eq(reuniao.id, linhaReuniao!.id))
+
+const cancelamento = await enviarReuniaoAoCrm(d, entrada.leadId)
+console.log(
+  `7b. cancelamento: ok=${cancelamento.ok} · criadas=${reuniaoCriada} · patches=${reuniaoPatch} · desfecho=${desfechoNoCrm}`,
+)
+if (!cancelamento.ok) problemas.push('o cancelamento não subiu ao CRM')
+if (reuniaoCriada !== 1) problemas.push('o cancelamento criou uma segunda reunião no CRM')
+if (reuniaoPatch !== 1) problemas.push('o cancelamento não atualizou a reunião existente')
+if (desfechoNoCrm !== 'CANCELED') problemas.push('a reunião não ficou como cancelada no CRM')
+
+// 7c. Lead sem contato no CRM não tenta nada: é o caso comum, não é erro.
+const outro = await ingerirLead(
+  d,
+  {
+    clienteSlug: 'ihte',
+    fluxoSlug: 'lead-novo',
+    dados: { 'Full Name': 'Sem CRM', 'E-mail': 'sem.crm@exemplo.com', Phone: '+61433444555' },
+  },
+  new Date('2026-03-10T23:00:00Z'),
+)
+if (outro.aceito) {
+  await d.insert(reuniao).values({
+    leadId: outro.leadId,
+    clienteId: c.id,
+    provedor: 'calendly',
+    status: 'marcada',
+    inicio: new Date('2026-03-13T01:00:00Z'),
+  })
+  const antes = reuniaoCriada + reuniaoPatch
+  const pulado = await enviarReuniaoAoCrm(d, outro.leadId)
+  console.log(`7c. lead fora do CRM: ok=${pulado.ok} · pulado=${pulado.pulado}`)
+  if (!pulado.ok || !pulado.pulado) problemas.push('tentou subir reunião de lead que não está no CRM')
+  if (reuniaoCriada + reuniaoPatch !== antes) problemas.push('chamou o HubSpot sem contato')
+  if ((await entregasDoLead(d, outro.leadId)).length !== 0) {
+    problemas.push('registrou entrega para uma subida que nem aconteceu')
+  }
 }
 
 // 8. Tudo que aconteceu com este lead está em um lugar só.
@@ -294,7 +388,8 @@ if (problemas.length > 0) {
   for (const p of problemas) console.log(`   ${p}`)
 } else {
   console.log('✅ assinatura conferida do outro lado, id estável entre reenvios, 400 sem insistência,')
-  console.log('   HubSpot com upsert e nota, e toda entrega — inclusive a que não aconteceu — registrada')
+  console.log('   HubSpot com upsert, nota e reunião que é atualizada ao cancelar em vez de duplicada,')
+  console.log('   e toda entrega — inclusive a que não aconteceu — registrada')
 }
 await encerrarFila()
 process.exit(problemas.length > 0 ? 1 : 0)

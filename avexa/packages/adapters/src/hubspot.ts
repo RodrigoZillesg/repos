@@ -32,6 +32,11 @@ export const ESCOPOS_HUBSPOT = [
   'crm.objects.contacts.write',
   'crm.schemas.contacts.read',
   'crm.schemas.contacts.write',
+  // Engajamentos: a nota com o resumo da conversa e a reunião marcada. O app
+  // precisa ter esses escopos habilitados no HubSpot, e um portal que não os
+  // concedeu devolve 403 — que aqui degrada o engajamento, nunca o contato.
+  'crm.objects.meetings.read',
+  'crm.objects.meetings.write',
 ]
 
 export interface ConfigHubspot {
@@ -359,6 +364,95 @@ export async function criarNota(
   // O escopo de notas nem sempre está concedido, e isso não pode derrubar a
   // entrega: o contato, que é o que importa, já foi gravado.
   return { ok: false, erro: r.erro ?? '', semPermissao: r.status === 403 }
+}
+
+/** Reunião na linha do tempo do contato.
+ *
+ *  Nota com a data escrita dentro não é reunião: não entra na agenda de
+ *  ninguém, não aparece nas atividades do dia do vendedor e não muda de estado
+ *  quando o lead cancela. Um objeto `meeting` faz as três coisas.
+ *
+ *  A reunião é criada uma vez e **atualizada** depois. O id do objeto fica
+ *  guardado do nosso lado justamente para isso: lead reentregue ou reunião
+ *  remarcada não pode virar duas reuniões na linha do tempo. */
+
+export type DesfechoReuniao = 'SCHEDULED' | 'COMPLETED' | 'RESCHEDULED' | 'NO_SHOW' | 'CANCELED'
+
+export interface ReuniaoHubspot {
+  titulo: string
+  corpo?: string | undefined
+  inicio: Date
+  fim?: Date | undefined
+  /** Link do evento ou da sala, para o vendedor entrar de dentro do CRM. */
+  link?: string | undefined
+  desfecho: DesfechoReuniao
+}
+
+export type ResultadoReuniaoHubspot =
+  | { ok: true; id: string; criada: boolean }
+  | { ok: false; erro: string; semPermissao: boolean; reenviavel: boolean }
+
+/** Associação 200 é a de reunião para contato, como 202 é a de nota. */
+export async function salvarReuniaoHubspot(
+  accessToken: string,
+  contatoId: string,
+  r: ReuniaoHubspot,
+  reuniaoId?: string | undefined,
+  buscar?: Buscar,
+): Promise<ResultadoReuniaoHubspot> {
+  const fim = r.fim ?? new Date(r.inicio.getTime() + 30 * 60_000)
+  const propriedades: Record<string, string> = {
+    hs_timestamp: r.inicio.toISOString(),
+    hs_meeting_title: r.titulo,
+    hs_meeting_start_time: r.inicio.toISOString(),
+    hs_meeting_end_time: fim.toISOString(),
+    hs_meeting_outcome: r.desfecho,
+    ...(r.corpo ? { hs_meeting_body: r.corpo } : {}),
+    ...(r.link ? { hs_meeting_external_url: r.link } : {}),
+  }
+
+  const cab = { authorization: `Bearer ${accessToken}` }
+
+  if (reuniaoId) {
+    const patch = await requisitar(`${API}/crm/v3/objects/meetings/${reuniaoId}`, {
+      metodo: 'PATCH',
+      cabecalhos: cab,
+      corpo: { properties: propriedades },
+      ...(buscar ? { buscar } : {}),
+    })
+    if (patch.ok) return { ok: true, id: reuniaoId, criada: false }
+    // 404: alguém apagou a reunião no portal. Criar de novo é o certo — o
+    // compromisso existe, e o vendedor precisa vê-lo.
+    if (patch.status !== 404) {
+      return {
+        ok: false,
+        erro: patch.erro ?? '',
+        semPermissao: patch.status === 403,
+        reenviavel: patch.reenviavel,
+      }
+    }
+  }
+
+  const criar = await requisitar(`${API}/crm/v3/objects/meetings`, {
+    cabecalhos: cab,
+    corpo: {
+      properties: propriedades,
+      associations: [
+        {
+          to: { id: contatoId },
+          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 200 }],
+        },
+      ],
+    },
+    ...(buscar ? { buscar } : {}),
+  })
+  if (criar.ok) return { ok: true, id: (criar.corpo as { id?: string } | null)?.id ?? '', criada: true }
+  return {
+    ok: false,
+    erro: criar.erro ?? '',
+    semPermissao: criar.status === 403,
+    reenviavel: criar.reenviavel,
+  }
 }
 
 export function configHubspotDoAmbiente(

@@ -4,6 +4,7 @@ import {
   criarNota,
   garantirPropriedades,
   salvarContato,
+  salvarReuniaoHubspot,
   statusDeLead,
   trocarCodigoHubspot,
   urlDeConsentimentoHubspot,
@@ -185,4 +186,86 @@ test('os status de lead vêm do portal, e os escondidos ficam de fora', async ()
     { valor: 'NEW', rotulo: 'Novo' },
     { valor: 'OPEN_DEAL', rotulo: 'Negócio aberto' },
   ])
+})
+
+test('reunião nova é criada e associada ao contato pelo tipo 200', async () => {
+  const f = fetchFalso([[/objects\/meetings$/, { corpo: { id: 'm1' }, metodo: 'POST' }]])
+  const r = await salvarReuniaoHubspot(
+    'at',
+    '77',
+    {
+      titulo: 'Conversa com Ana',
+      inicio: new Date('2026-03-12T01:00:00Z'),
+      fim: new Date('2026-03-12T01:30:00Z'),
+      desfecho: 'SCHEDULED',
+    },
+    undefined,
+    f.buscar,
+  )
+  assert.deepEqual(r, { ok: true, id: 'm1', criada: true })
+  const corpo = f.chamadas[0]!.corpo as {
+    properties: Record<string, string>
+    associations: Array<{ to: { id: string }; types: Array<{ associationTypeId: number }> }>
+  }
+  assert.equal(corpo.associations[0]!.types[0]!.associationTypeId, 200)
+  assert.equal(corpo.properties.hs_meeting_outcome, 'SCHEDULED')
+  assert.equal(corpo.properties.hs_timestamp, '2026-03-12T01:00:00.000Z')
+})
+
+test('reunião que já existe é atualizada, nunca criada de novo', async () => {
+  const f = fetchFalso([[/objects\/meetings\/m1/, { corpo: { id: 'm1' }, metodo: 'PATCH' }]])
+  const r = await salvarReuniaoHubspot(
+    'at',
+    '77',
+    { titulo: 'Reunião cancelada', inicio: new Date('2026-03-12T01:00:00Z'), desfecho: 'CANCELED' },
+    'm1',
+    f.buscar,
+  )
+  assert.deepEqual(r, { ok: true, id: 'm1', criada: false })
+  assert.equal(f.chamadas.length, 1)
+  assert.equal(f.chamadas[0]!.metodo, 'PATCH')
+  const props = (f.chamadas[0]!.corpo as { properties: Record<string, string> }).properties
+  assert.equal(props.hs_meeting_outcome, 'CANCELED')
+})
+
+test('reunião apagada no portal é recriada em vez de sumir', async () => {
+  const f = fetchFalso([
+    [/objects\/meetings\/m1/, { status: 404, metodo: 'PATCH' }],
+    [/objects\/meetings$/, { corpo: { id: 'm2' }, metodo: 'POST' }],
+  ])
+  const r = await salvarReuniaoHubspot(
+    'at',
+    '77',
+    { titulo: 'Conversa', inicio: new Date('2026-03-12T01:00:00Z'), desfecho: 'SCHEDULED' },
+    'm1',
+    f.buscar,
+  )
+  assert.deepEqual(r, { ok: true, id: 'm2', criada: true })
+})
+
+test('sem fim, a reunião dura meia hora em vez de não ter fim nenhum', async () => {
+  const f = fetchFalso([[/objects\/meetings$/, { corpo: { id: 'm1' }, metodo: 'POST' }]])
+  await salvarReuniaoHubspot(
+    'at',
+    '77',
+    { titulo: 'Conversa', inicio: new Date('2026-03-12T01:00:00Z'), desfecho: 'SCHEDULED' },
+    undefined,
+    f.buscar,
+  )
+  const props = (f.chamadas[0]!.corpo as { properties: Record<string, string> }).properties
+  assert.equal(props.hs_meeting_end_time, '2026-03-12T01:30:00.000Z')
+})
+
+test('403 na reunião é falta de escopo, e não é reenviável', async () => {
+  const f = fetchFalso([[/objects\/meetings$/, { status: 403, metodo: 'POST' }]])
+  const r = await salvarReuniaoHubspot(
+    'at',
+    '77',
+    { titulo: 'Conversa', inicio: new Date('2026-03-12T01:00:00Z'), desfecho: 'SCHEDULED' },
+    undefined,
+    f.buscar,
+  )
+  assert.equal(r.ok, false)
+  assert.equal(r.ok === false && r.semPermissao, true)
+  assert.equal(r.ok === false && r.reenviavel, false)
 })

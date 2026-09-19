@@ -343,6 +343,7 @@ export async function resumoMonitor(
     d.select({ id: supressao.id }).from(supressao),
     d
       .select({
+        leadId: entrega.leadId,
         destino: entrega.destino,
         estado: entrega.estado,
         erro: entrega.erro,
@@ -404,7 +405,12 @@ export async function resumoMonitor(
       leads: leadsRecebidos.length,
       contatos: tentativas.filter(saiu).length,
       respostas: tentativas.filter(respondeu).length,
-      entregues: entregas.filter((e) => e.estado === 'entregue').length,
+      // Leads, não linhas: um lead pode ter várias entregas (CRM, webhook, e a
+      // reunião subindo de novo a cada remarcação), e contar linhas faria este
+      // número passar do total de leads recebidos.
+      entregues: new Set(
+        entregas.filter((e) => e.estado === 'entregue').map((e) => e.leadId),
+      ).size,
       suprimidosTotal: suprimidos.length,
     },
     porCanal,

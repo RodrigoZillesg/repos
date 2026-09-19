@@ -36,6 +36,13 @@
       "when": 1789826022975,
       "tag": "0004_shiny_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789831960000,
+      "tag": "0005_ordinary_lester",
+      "breakpoints": true
     }
   ]
 }
