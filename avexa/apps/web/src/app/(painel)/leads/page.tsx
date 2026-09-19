@@ -2,11 +2,28 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
-import { clientePadrao, listarClientes, listarLeads } from '@/lib/dados'
+import { clientePadrao, listarClientes, listarLeads, type LeadNaLista } from '@/lib/dados'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
 import { CORES } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
+
+/** `sem_destino` é vermelho igual a `falhou`: para quem espera o lead, "o fluxo
+ *  pedia um destino que não existe" e "o destino recusou" dão no mesmo. */
+const TOM_ENTREGA: Record<string, 'ok' | 'alerta' | 'neutro'> = {
+  entregue: 'ok',
+  falhou: 'alerta',
+  sem_destino: 'alerta',
+  seco: 'neutro',
+}
+
+const emAndamento = (estado: string | null) => estado === 'aguardando' || estado === 'executando'
+
+/** Lead que valia a pena, fluxo terminado, e nenhuma entrega sequer tentada.
+ *  Costuma ser fluxo publicado sem etapa de saída — e ninguém descobre isso
+ *  olhando o fluxo, só olhando o lead que não chegou. */
+const qualificadoSemSaida = (l: LeadNaLista) =>
+  l.entregas.length === 0 && (l.score ?? 0) >= 60 && l.estado === 'concluida'
 
 /** Lista de leads.
  *
@@ -31,9 +48,20 @@ export default async function PaginaLeads({
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
   const leads = await listarLeads(s, cli.id)
+  const detalhe = !s.permissoes.escopoCliente
+
+  /** Nome curto do destino: a coluna é estreita e "google_sheets" não diz nada
+   *  para quem lê. */
+  const NOME_DESTINO: Record<string, string> = {
+    hubspot: 'CRM',
+    email_time: 'E-mail do time',
+    google_sheets: 'Planilha',
+    webhook: 'Webhook',
+    webhook_saida: 'Webhook (fluxo)',
+  }
 
   const rotuloResultado = (estado: string | null, motivo: string | null) => {
-    if (estado === 'aguardando' || estado === 'executando') return 'em andamento'
+    if (emAndamento(estado)) return 'em andamento'
     if (motivo === 'lead respondeu') return 'respondeu'
     if (motivo === 'suprimido') return 'pediu para parar'
     if (motivo === 'teto_de_tentativas') return 'sem resposta'
@@ -80,6 +108,7 @@ export default async function PaginaLeads({
                 <th className="p-3 font-medium">{t['leads.score']}</th>
                 <th className="p-3 font-medium">Contatos</th>
                 <th className="p-3 font-medium">{t['leads.resultado']}</th>
+                <th className="p-3 font-medium">{t['leads.entrega']}</th>
                 <th className="p-3 font-medium">{t['leads.recebido']}</th>
               </tr>
             </thead>
@@ -114,6 +143,45 @@ export default async function PaginaLeads({
                   </td>
                   <td className="p-3 text-[var(--color-tinta-2)]">
                     {rotuloResultado(l.estado, l.motivo)}
+                  </td>
+                  <td className="p-3">
+                    {l.entregas.length === 0 ? (
+                      // Vazio não é falha: o fluxo pode não ter chegado à etapa
+                      // de saída ainda. Dizer "não entregue" aqui seria alarme
+                      // falso em todo lead que acabou de entrar.
+                      emAndamento(l.estado) ? (
+                        <span className="text-xs text-[var(--color-tinta-3)]">
+                          {t['leads.entrega.noFluxo']}
+                        </span>
+                      ) : qualificadoSemSaida(l) ? (
+                        // Lead bom, fluxo encerrado, e nenhuma etapa de saída
+                        // registrou nada. Não é erro de entrega — é fluxo sem
+                        // destino, que é pior, porque não gera nem falha.
+                        <Selo tom="alerta">{t['leads.entrega.semSaida']}</Selo>
+                      ) : (
+                        <span className="text-xs text-[var(--color-tinta-3)]">—</span>
+                      )
+                    ) : (
+                      <ul className="space-y-1">
+                        {l.entregas.map((e) => (
+                          <li key={e.destino}>
+                            <Selo tom={TOM_ENTREGA[e.estado] ?? 'neutro'}>
+                              {NOME_DESTINO[e.destino] ?? e.destino}
+                              {e.estado === 'seco' ? ' · teste' : ''}
+                            </Selo>
+                            {(e.estado === 'falhou' || e.estado === 'sem_destino') && (
+                              <span className="mt-0.5 block max-w-[22rem] text-xs leading-snug text-[var(--color-alerta)]">
+                                {t['leads.entrega.naoChegou']}
+                                {/* O texto cru do erro é do operador: para o
+                                    cliente final é ruído, e pode trazer junto
+                                    resposta de fornecedor que não é dele. */}
+                                {detalhe && e.erro ? `: ${e.erro}` : ''}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                   <td className="p-3 text-xs text-[var(--color-tinta-3)]">
                     {l.criadoEm.toISOString().slice(0, 16).replace('T', ' ')}

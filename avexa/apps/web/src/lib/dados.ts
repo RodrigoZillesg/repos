@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray } from 'drizzle-orm'
 import {
   cliente,
   clienteCanal,
@@ -87,6 +87,14 @@ export async function listarTemplates(clienteId: string, canal?: string) {
     .orderBy(template.nome)
 }
 
+export interface EntregaDoLead {
+  destino: string
+  estado: string
+  erro: string | null
+  externoId: string | null
+  quando: Date
+}
+
 export interface LeadNaLista {
   id: string
   nome: string | null
@@ -98,6 +106,9 @@ export interface LeadNaLista {
   estado: string | null
   motivo: string | null
   contatos: number
+  /** Onde este lead foi parar. Vazio enquanto o fluxo não chegou à etapa de
+   *  saída — que é diferente de ter tentado e não ter chegado. */
+  entregas: EntregaDoLead[]
 }
 
 export async function listarLeads(s: Sessao, clienteId: string, limite = 100): Promise<LeadNaLista[]> {
@@ -107,7 +118,11 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
   if (!alvo) return []
 
   const d = db()
-  const linhas = await d
+  // Sem join com execução: um lead pode ter mais de uma (entrou de novo por
+  // outro fluxo), e o join devolveria a mesma pessoa em duas linhas — que é
+  // exatamente o que esta tela não pode fazer, porque lead duplicado é uma das
+  // coisas que o operador vem aqui conferir.
+  const leads = await d
     .select({
       id: lead.id,
       nome: lead.nome,
@@ -116,19 +131,50 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
       score: lead.score,
       resumo: lead.resumo,
       criadoEm: lead.criadoEm,
-      estado: execucao.estado,
-      motivo: execucao.motivoEncerramento,
     })
     .from(lead)
-    .leftJoin(execucao, eq(execucao.leadId, lead.id))
     .where(eq(lead.clienteId, alvo))
     .orderBy(desc(lead.criadoEm))
     .limit(limite)
 
-  const contagens = await d
-    .select({ leadId: tentativa.leadId, estado: tentativa.estado })
-    .from(tentativa)
-    .where(eq(tentativa.clienteId, alvo))
+  const ids = leads.map((l) => l.id)
+  if (ids.length === 0) return []
+
+  // Limitado aos leads desta página: carregar as tentativas do cliente inteiro
+  // cresce com a base e esta tela é a mais aberta do painel.
+  const [execucoes, contagens, entregas] = await Promise.all([
+    d
+      .select({
+        leadId: execucao.leadId,
+        estado: execucao.estado,
+        motivo: execucao.motivoEncerramento,
+      })
+      .from(execucao)
+      .where(inArray(execucao.leadId, ids))
+      .orderBy(desc(execucao.iniciadoEm)),
+    d
+      .select({ leadId: tentativa.leadId, estado: tentativa.estado })
+      .from(tentativa)
+      .where(inArray(tentativa.leadId, ids)),
+    d
+      .select({
+        leadId: entrega.leadId,
+        destino: entrega.destino,
+        estado: entrega.estado,
+        erro: entrega.erro,
+        externoId: entrega.externoId,
+        criadoEm: entrega.criadoEm,
+      })
+      .from(entrega)
+      .where(inArray(entrega.leadId, ids))
+      .orderBy(desc(entrega.criadoEm)),
+  ])
+
+  // A execução mais recente é a que a tela mostra: é o estado atual do lead.
+  const porExecucao = new Map<string, { estado: string; motivo: string | null }>()
+  for (const e of execucoes) {
+    if (!porExecucao.has(e.leadId)) porExecucao.set(e.leadId, { estado: e.estado, motivo: e.motivo })
+  }
 
   const porLead = new Map<string, number>()
   for (const c of contagens) {
@@ -137,7 +183,31 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
     }
   }
 
-  return linhas.map((l) => ({ ...l, contatos: porLead.get(l.id) ?? 0 }))
+  // Uma linha por destino: a última tentativa é a que vale. Um webhook que
+  // falhou e foi reenviado com sucesso está entregue, e mostrar as duas linhas
+  // faria parecer problema onde já não há.
+  const entregasPorLead = new Map<string, EntregaDoLead[]>()
+  for (const e of entregas) {
+    const lista = entregasPorLead.get(e.leadId) ?? []
+    if (!lista.some((x) => x.destino === e.destino)) {
+      lista.push({
+        destino: e.destino,
+        estado: e.estado,
+        erro: e.erro,
+        externoId: e.externoId,
+        quando: e.criadoEm,
+      })
+    }
+    entregasPorLead.set(e.leadId, lista)
+  }
+
+  return leads.map((l) => ({
+    ...l,
+    estado: porExecucao.get(l.id)?.estado ?? null,
+    motivo: porExecucao.get(l.id)?.motivo ?? null,
+    contatos: porLead.get(l.id) ?? 0,
+    entregas: entregasPorLead.get(l.id) ?? [],
+  }))
 }
 
 export async function tentativasDoLead(s: Sessao, leadId: string) {

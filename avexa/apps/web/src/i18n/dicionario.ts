@@ -72,6 +72,10 @@ const pt = {
   'leads.score': 'Score',
   'leads.resultado': 'Resultado',
   'leads.recebido': 'Recebido',
+  'leads.entrega': 'Entrega',
+  'leads.entrega.noFluxo': 'ainda no fluxo',
+  'leads.entrega.naoChegou': 'não chegou',
+  'leads.entrega.semSaida': 'qualificado e não entregue',
   'seco.aviso':
     'Modo seco: o fluxo roda inteiro e cada tentativa fica gravada, mas nada é enviado.',
 } as const
@@ -141,6 +145,10 @@ const en: Record<Chave, string> = {
   'leads.score': 'Score',
   'leads.resultado': 'Outcome',
   'leads.recebido': 'Received',
+  'leads.entrega': 'Delivery',
+  'leads.entrega.noFluxo': 'still in the flow',
+  'leads.entrega.naoChegou': 'did not arrive',
+  'leads.entrega.semSaida': 'qualified but never delivered',
   'seco.aviso': 'Dry run: the flow runs in full and every attempt is recorded, but nothing is sent.',
 }
 

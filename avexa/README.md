@@ -175,6 +175,14 @@ num cliente sem CRM conectado era um `return` silencioso.
 A carga é a mesma nos quatro destinos, e inclui a reunião quando existe — é a
 primeira coisa que o comercial quer saber antes de ligar.
 
+A tela de Leads mostra, lead a lead, para onde ele foi e se chegou. Três estados
+que não são a mesma coisa e a tela não deixa confundir: **ainda no fluxo** (a
+execução não chegou à etapa de saída), **não chegou** (tentou e falhou, com o
+motivo) e **qualificado e não entregue** — lead bom, fluxo encerrado e nenhuma
+entrega sequer tentada, que quase sempre é fluxo publicado sem etapa de saída.
+Esse último não gera erro em lugar nenhum; só aparece aqui. O cliente final vê o
+"não chegou", mas não o texto cru do erro do fornecedor.
+
 ### Webhook do cliente
 
 Cada envio leva:
