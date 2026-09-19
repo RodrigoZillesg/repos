@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type {
   AdaptadorCanal,
   EventoRecebido,
@@ -84,4 +85,39 @@ export function adaptadorTwilioSms(cfg: ConfigTwilio): AdaptadorCanal {
       ]
     },
   }
+}
+
+/** Confere a assinatura do webhook do Twilio.
+ *
+ *  Sem isto, `/api/webhooks/sms` aceita qualquer POST de qualquer um. E o
+ *  estrago não é teórico: basta mandar `Body=STOP&From=<numero>` para pôr o
+ *  número de um lead real na supressão global e calar o contato com ele. Ou
+ *  forjar "o lead respondeu" e fazer o motor abandonar a sequência.
+ *
+ *  O algoritmo é o do Twilio: HMAC-SHA1 do authToken sobre a URL exata que
+ *  ele chamou, concatenada com os pares do formulário ordenados por chave.
+ *  A URL tem que ser a pública — atrás do nginx, a URL que o Next monta é
+ *  http://0.0.0.0:3000 e a assinatura nunca bateria. */
+export function conferirAssinaturaTwilio(
+  authToken: string,
+  url: string,
+  parametros: Record<string, string>,
+  assinatura: string | null | undefined,
+): boolean {
+  if (!assinatura || !authToken) return false
+
+  const dados =
+    url +
+    Object.keys(parametros)
+      .sort()
+      .map((k) => k + parametros[k])
+      .join('')
+
+  const esperado = createHmac('sha1', authToken).update(dados, 'utf8').digest('base64')
+
+  // Comparação em tempo constante: comparar com === vaza, pelo tempo, quantos
+  // bytes iniciais o atacante acertou.
+  const a = Buffer.from(esperado)
+  const b = Buffer.from(assinatura)
+  return a.length === b.length && timingSafeEqual(a, b)
 }

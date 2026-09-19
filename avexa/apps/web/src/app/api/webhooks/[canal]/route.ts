@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { Canal } from '@avexa/core'
 import { fila, FILAS } from '@avexa/servicos'
+import { conferirAssinaturaTwilio } from '@avexa/adapters'
+import { basePublica } from '@/lib/url'
 
 /** Retorno dos fornecedores: entrega, leitura, resposta, bounce, opt-out, fim de
  *  chamada.
@@ -49,6 +51,35 @@ export async function POST(req: Request, ctx: { params: Promise<{ canal: string 
       corpo = await req.json()
     } catch {
       corpo = {}
+    }
+  }
+
+  // O SMS é Twilio, e o Twilio assina. Sem conferir, esta rota aceitaria de
+  // qualquer um um `Body=STOP&From=<numero>` — o que põe o número de um lead
+  // real na supressão GLOBAL e cala o contato com ele para sempre. Também dá
+  // para forjar "o lead respondeu" e fazer o motor abandonar a sequência.
+  //
+  // A URL assinada é a pública: atrás do nginx, a que o Next monta é
+  // http://0.0.0.0:3000 e nenhuma assinatura bateria.
+  if (canal === 'sms') {
+    const token = process.env.TWILIO_AUTH_TOKEN
+    const alvo = new URL(req.url)
+    const urlPublica = `${basePublica(req.headers, req.url)}${alvo.pathname}${alvo.search}`
+    const valida =
+      !!token &&
+      typeof corpo === 'object' &&
+      corpo !== null &&
+      conferirAssinaturaTwilio(
+        token,
+        urlPublica,
+        corpo as Record<string, string>,
+        req.headers.get('x-twilio-signature'),
+      )
+
+    if (!valida) {
+      // Sem detalhe na resposta: dizer "assinatura inválida" contra "canal
+      // desconhecido" ajuda quem está sondando.
+      return NextResponse.json({ erro: 'nao autorizado' }, { status: 403 })
     }
   }
 
