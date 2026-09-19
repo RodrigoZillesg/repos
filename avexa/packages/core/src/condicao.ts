@@ -13,6 +13,11 @@ export interface ContextoFluxo {
   campos?: Record<string, unknown>
   etiquetas?: string[]
   qualificado?: boolean
+  /** O contexto acumula o que o fluxo aprendeu, inclusive campo personalizado
+   *  que ninguém previu. A assinatura aberta é deliberada: exigir declaração
+   *  prévia quebraria a promessa de que tudo que chega no webhook fica
+   *  disponível nas condições e nos textos. */
+  [chave: string]: unknown
 }
 
 export type Operador =

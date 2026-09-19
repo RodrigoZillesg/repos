@@ -1,0 +1,17 @@
+{
+  "name": "@avexa/servicos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@avexa/core": "workspace:*",
+    "@avexa/db": "workspace:*",
+    "drizzle-orm": "^0.38.3",
+    "pg-boss": "^10.1.6"
+  },
+  "devDependencies": { "typescript": "^5.7.3", "@types/node": "^22.10.5" }
+}

@@ -36,3 +36,54 @@ jobs:
       # regra passa por aqui antes de chegar perto de um lead real.
       - name: Motor e simulador
         run: pnpm -r test
+
+  ponta-a-ponta:
+    name: Avexa — lead de teste ponta a ponta
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: avexa
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: avexa
+          POSTGRES_PASSWORD: avexa
+          POSTGRES_DB: avexa
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U avexa"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://avexa:avexa@localhost:5432/avexa
+      # Credenciais de fachada: os e2e rodam em modo seco e os adaptadores só
+      # são exercitados na leitura de webhook, que não faz chamada de rede.
+      TWILIO_ACCOUNT_SID: AC_ci
+      TWILIO_AUTH_TOKEN: ci
+      TWILIO_REMETENTE: '+15550000000'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: avexa/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm db:seed
+
+      # Um lead atravessa o fluxo inteiro: ligação, espera na janela do fuso do
+      # lead, WhatsApp, espera de 24 horas úteis, e-mail, qualificação e saída.
+      - name: Lead de teste
+        run: pnpm --filter @avexa/worker e2e
+
+      # A regra que, se falhar, falha calada: opt-out num cliente bloqueia o
+      # contato em outro cliente, em todos os canais.
+      - name: Supressão global entre clientes
+        run: pnpm --filter @avexa/worker e2e:optout

@@ -9,11 +9,13 @@ O brief de produto, com as decisões e as pendências, está em
 
 ## Estrutura
 
-    apps/web         Painel Next.js (App Router, TypeScript) e as rotas de webhook
-    apps/worker      Processo do motor de fluxo, sobre fila durável em Postgres
-    packages/core    Tipos de etapa, regras do motor, janela de contato, adaptadores
-    packages/db      Schema Drizzle e migrações
-    packages/adapters Implementações de canal: Resend, WhatsApp Cloud API, Twilio, Vapi
+    apps/web           Painel Next.js (App Router, TypeScript) e as rotas de webhook
+    apps/worker        Processo do motor de fluxo, sobre fila durável em Postgres
+    packages/core      Tipos de etapa, regras, janela de contato, motor, simulador
+    packages/db        Schema Drizzle, migrações e seed
+    packages/adapters  Canais: Resend, WhatsApp Cloud API, Twilio, Vapi
+    packages/ia        Modelo de linguagem plugável, Gemini como default
+    packages/servicos  Supressão, ingestão de lead, fatos do motor, fila
 
 `packages/core` não importa nada de `db` nem de `adapters`: ele define a interface
 e as regras, e os outros dependem dele. É o que mantém o motor ignorante sobre
@@ -30,3 +32,15 @@ quem é o fornecedor de cada canal.
 Testes do núcleo, sem build e sem banco:
 
     pnpm --filter @avexa/core test
+
+Lead de teste ponta a ponta, contra o banco (é o passo 9 da ativação em forma
+de script — relógio virtual, então uma espera de 24 horas não segura o teste):
+
+    pnpm --filter @avexa/worker e2e
+    pnpm --filter @avexa/worker e2e:optout
+
+## Modo seco
+
+Todo cliente nasce com `dry_run` ligado: o fluxo roda por inteiro, cada
+tentativa fica gravada com o texto que teria sido enviado, e nenhum lead recebe
+nada. É o que permite rodar em espelho antes de virar a chave.
