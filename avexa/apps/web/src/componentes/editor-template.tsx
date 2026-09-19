@@ -9,6 +9,8 @@ import type { Chave } from '@/i18n/dicionario'
 import type { EntradaTemplate } from '@/app/(painel)/templates/acoes'
 
 interface Props {
+  /** Nome do cliente dono desta biblioteca, para a prévia não mostrar o de outro. */
+  clienteNome: string
   template: {
     id: string
     nome: string
@@ -25,7 +27,7 @@ interface Props {
   aoSubmeter: (id: string) => Promise<{ ok: boolean; erro?: string }>
 }
 
-export function EditorTemplate({ template, t, aoSalvar, aoSubmeter }: Props) {
+export function EditorTemplate({ clienteNome, template, t, aoSalvar, aoSubmeter }: Props) {
   const [nome, setNome] = useState(template.nome)
   const [assunto, setAssunto] = useState(template.assunto ?? '')
   const [corpo, setCorpo] = useState(template.corpo)
@@ -35,7 +37,7 @@ export function EditorTemplate({ template, t, aoSalvar, aoSubmeter }: Props) {
 
   const nomes = variaveisDe(corpo)
   const textoMudou = corpo.trim() !== template.corpo.trim()
-  const previa = renderizar(corpo, { ...variaveis, nome: 'Ana Ribeiro', cliente: 'International House' })
+  const previa = renderizar(corpo, { ...variaveis, nome: 'Ana Ribeiro', cliente: clienteNome })
 
   function salvar() {
     iniciar(async () => {

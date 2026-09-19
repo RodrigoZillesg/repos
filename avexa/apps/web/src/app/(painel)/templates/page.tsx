@@ -133,6 +133,7 @@ export default async function PaginaTemplates({
         {escolhido ? (
           <EditorTemplate
             key={escolhido.id}
+            clienteNome={cli.nome}
             template={{
               id: escolhido.id,
               nome: escolhido.nome,

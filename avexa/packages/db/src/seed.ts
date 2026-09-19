@@ -57,7 +57,35 @@ const etapa = (tipo: string, cfg: Record<string, string>, extra: Record<string, 
   ...extra,
 })
 
-function fluxoLeadNovo(slug: string) {
+/** Monta o fluxo padrão só com os canais que o cliente contratou.
+ *
+ *  É o que o passo 7 da ativação promete ("modelos carregados conforme os canais
+ *  contratados"). Semear todo mundo com o mesmo fluxo daria uma base de
+ *  desenvolvimento que contradiz o produto: etapas marcadas "off" desde o
+ *  nascimento, que o motor pularia sempre. */
+function fluxoLeadNovo(slug: string, canais: Record<string, boolean>) {
+  const contato = [
+    canais.ligacao &&
+      etapa('ligacao', {
+        roteiro: 'Qualificação inicial',
+        ring: '30 segundos',
+        vm: 'Deixar recado',
+        obs: '',
+      }),
+    canais.ligacao && canais.whatsapp && etapa('espera', { dur: '2 horas', cancel: 'Sim' }),
+    canais.whatsapp &&
+      etapa('whatsapp', {
+        modo: 'Template aprovado',
+        template: 'Primeiro contato',
+        conversa: 'Sim',
+      }),
+    (canais.ligacao || canais.whatsapp) &&
+      canais.email &&
+      etapa('espera', { dur: '24 horas', cancel: 'Sim' }),
+    canais.email && etapa('email', { template: 'Retomada', replyto: 'Time do cliente' }),
+    canais.sms && !canais.whatsapp && etapa('sms', { template: 'Lembrete', link: 'Sim' }),
+  ].filter(Boolean) as ReturnType<typeof etapa>[]
+
   return [
     etapa('entrada', {
       url: `https://hooks.avexa.global/v1/${slug}/lead-novo`,
@@ -69,20 +97,7 @@ function fluxoLeadNovo(slug: string) {
       dedupe: 'Atualizar e não recontatar',
     }),
     etapa('guarda', { janela: '09:00 às 20:00', fds: 'Não' }),
-    etapa('ligacao', {
-      roteiro: 'Qualificação inicial',
-      ring: '30 segundos',
-      vm: 'Deixar recado',
-      obs: '',
-    }),
-    etapa('espera', { dur: '2 horas', cancel: 'Sim' }),
-    etapa('whatsapp', {
-      modo: 'Template aprovado',
-      template: 'Primeiro contato',
-      conversa: 'Sim',
-    }),
-    etapa('espera', { dur: '24 horas', cancel: 'Sim' }),
-    etapa('email', { template: 'Retomada', replyto: 'Time do cliente' }),
+    ...contato,
     etapa('score', { criterio: 'Quer começar nos próximos 3 meses', corte: '60' }),
     etapa(
       'condicao',
@@ -175,7 +190,12 @@ async function semear(): Promise<void> {
 
     const [ver] = await d
       .insert(fluxoVersao)
-      .values({ fluxoId: flu!.id, versao: 1, grafo: fluxoLeadNovo(c.slug), publicadaEm: new Date() })
+      .values({
+        fluxoId: flu!.id,
+        versao: 1,
+        grafo: fluxoLeadNovo(c.slug, c.canais),
+        publicadaEm: new Date(),
+      })
       .returning({ id: fluxoVersao.id })
 
     await d.update(fluxo).set({ versaoPublicadaId: ver!.id }).where(eq(fluxo.id, flu!.id))
