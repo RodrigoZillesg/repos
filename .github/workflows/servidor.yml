@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, publicar-tls]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -127,6 +127,46 @@ jobs:
           echo
           echo "=== um exemplo de server block deles ==="
           sed -n '1,40p' /srv/avexa/nginx/conf.d/routes.conf 2>&1 || true
+          REMOTO
+
+      # Põe o domínio no ar acrescentando UM arquivo em conf.d/clients/. Nenhum
+      # arquivo do outro produto é editado. O reload só acontece se o nginx -t
+      # passar: config inválida aqui derruba avexa.global e admin.avexa.global
+      # junto, e isso não é risco que se corra por um domínio novo.
+      - name: Publicar no nginx
+        if: inputs.acao == 'publicar' || inputs.acao == 'publicar-tls'
+        run: |
+          arquivo=avexa/infra/nginx-new.conf
+          [ "${{ inputs.acao }}" = "publicar-tls" ] && arquivo=avexa/infra/nginx-new-tls.conf
+          echo "instalando $arquivo"
+          scp -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "$arquivo"             "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}:/tmp/new.conf"
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          alvo=/srv/avexa/nginx/conf.d/clients/new.conf
+          proxy=$(docker ps --format '{{.Names}}' | grep -Ei 'nginx' | head -1)
+
+          # Guarda o que estava lá, se estava. Voltar atrás tem que ser uma
+          # linha, não uma arqueologia.
+          if [ -f "$alvo" ]; then
+            cp -a "$alvo" "${alvo}.bak.$(date +%s)"
+            echo "config anterior salva como ${alvo}.bak.*"
+          fi
+
+          install -m 644 /tmp/new.conf "$alvo"
+          rm -f /tmp/new.conf
+
+          echo "== nginx -t =="
+          if ! docker exec "$proxy" nginx -t; then
+            echo "::error::config inválida — removendo e NÃO recarregando"
+            rm -f "$alvo"
+            docker exec "$proxy" nginx -t
+            exit 1
+          fi
+
+          echo "== reload =="
+          docker exec "$proxy" nginx -s reload
+          echo "vhost no ar. Os outros domínios continuam como estavam:"
+          docker exec "$proxy" nginx -T 2>/dev/null | grep -E '^\s*server_name' | sort -u
           REMOTO
 
       - name: Logs
