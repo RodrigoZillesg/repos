@@ -37,6 +37,11 @@ jobs:
       - name: Motor e simulador
         run: pnpm -r test
 
+      # O typecheck não enxerga erro de build: as telas do painel só são
+      # compiladas de verdade aqui.
+      - name: Build do painel
+        run: pnpm --filter @avexa/web build
+
   ponta-a-ponta:
     name: Avexa — lead de teste ponta a ponta
     runs-on: ubuntu-latest
