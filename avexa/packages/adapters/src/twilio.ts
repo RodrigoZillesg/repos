@@ -18,8 +18,12 @@ import { requisitar, type Buscar } from './http.ts'
 export interface ConfigTwilio {
   accountSid: string
   authToken: string
-  /** Número remetente em E.164, ou SID do Messaging Service. */
-  remetente: string
+  /** Remetente de reserva, em E.164 ou SID de Messaging Service.
+   *
+   *  Opcional de propósito: o normal é cada cliente falar do próprio número,
+   *  que vem na intenção de contato. Isto aqui só cobre quem ainda não tem
+   *  número atribuído. */
+  remetente?: string
   statusCallback?: string
   buscar?: Buscar
 }
@@ -36,6 +40,15 @@ export function adaptadorTwilioSms(cfg: ConfigTwilio): AdaptadorCanal {
       }
       // MG… é Messaging Service; qualquer outra coisa é número remetente.
       const de = i.remetente ?? cfg.remetente
+      if (!de) {
+        // Sem número, o Twilio devolveria um 400 obscuro. Melhor dizer o que
+        // realmente falta, e não insistir: nenhuma retentativa arruma isto.
+        return {
+          ok: false,
+          erro: 'sem remetente: este cliente não tem número atribuído e não há remetente de reserva',
+          reenviavel: false,
+        }
+      }
       if (de.startsWith('MG')) corpo.MessagingServiceSid = de
       else corpo.From = de
       if (cfg.statusCallback) corpo.StatusCallback = cfg.statusCallback
@@ -120,4 +133,166 @@ export function conferirAssinaturaTwilio(
   const a = Buffer.from(esperado)
   const b = Buffer.from(assinatura)
   return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/* ------------------------------------------------------------------------ *
+ * Provisionamento de números.
+ *
+ * O ponto do produto é comprar o número do cliente daqui, sem ninguém abrir o
+ * console do Twilio. Cada cliente fala do próprio número: o lead reconhece
+ * quem o procurou, e o SMS sai do mesmo número que liga.
+ * ------------------------------------------------------------------------ */
+
+export interface CredenciaisTwilio {
+  accountSid: string
+  authToken: string
+  buscar?: Buscar
+}
+
+export interface NumeroDisponivel {
+  e164: string
+  amigavel: string
+  regiao: string | null
+  locality: string | null
+  capacidades: string[]
+}
+
+export interface NumeroComprado {
+  e164: string
+  sid: string
+  capacidades: string[]
+}
+
+export type ResultadoNumeros =
+  | { ok: true; numeros: NumeroDisponivel[] }
+  | { ok: false; erro: string }
+
+export type ResultadoCompra = { ok: true; numero: NumeroComprado } | { ok: false; erro: string }
+
+const autorizacao = (c: CredenciaisTwilio) => ({
+  authorization: `Basic ${Buffer.from(`${c.accountSid}:${c.authToken}`).toString('base64')}`,
+})
+
+const base = (c: CredenciaisTwilio) =>
+  `https://api.twilio.com/2010-04-01/Accounts/${c.accountSid}`
+
+const capacidadesDe = (v: unknown): string[] => {
+  const c = (v ?? {}) as Record<string, boolean>
+  return [c.voice ? 'voz' : '', c.SMS || c.sms ? 'sms' : ''].filter(Boolean)
+}
+
+export interface BuscaDeNumeros {
+  /** ISO de dois caracteres: AU, US. */
+  pais: string
+  /** Exige voz além de SMS. Um número que só manda SMS não serve para o motor
+   *  de voz, e descobrir isso na hora de ligar é tarde. */
+  exigeVoz?: boolean
+  /** Prefixo, DDD ou parte do número, no formato do Twilio. */
+  contem?: string
+  limite?: number
+}
+
+/** Lista números à venda no Twilio. Não compra nada e não custa nada. */
+export async function buscarNumerosDisponiveis(
+  cred: CredenciaisTwilio,
+  b: BuscaDeNumeros,
+): Promise<ResultadoNumeros> {
+  const q = new URLSearchParams({
+    SmsEnabled: 'true',
+    PageSize: String(b.limite ?? 10),
+    ...(b.exigeVoz !== false ? { VoiceEnabled: 'true' } : {}),
+    ...(b.contem ? { Contains: b.contem } : {}),
+  })
+
+  const r = await requisitar(
+    `${base(cred)}/AvailablePhoneNumbers/${b.pais.toUpperCase()}/Local.json?${q}`,
+    {
+      metodo: 'GET',
+      cabecalhos: autorizacao(cred),
+      ...(cred.buscar ? { buscar: cred.buscar } : {}),
+    },
+  )
+
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao consultar números' }
+
+  const lista = (r.corpo as { available_phone_numbers?: unknown[] } | null)
+    ?.available_phone_numbers
+  if (!Array.isArray(lista)) return { ok: false, erro: 'resposta do Twilio sem lista de números' }
+
+  return {
+    ok: true,
+    numeros: lista.map((n) => {
+      const x = n as Record<string, unknown>
+      return {
+        e164: String(x.phone_number ?? ''),
+        amigavel: String(x.friendly_name ?? ''),
+        regiao: (x.region as string) ?? null,
+        locality: (x.locality as string) ?? null,
+        capacidades: capacidadesDe(x.capabilities),
+      }
+    }),
+  }
+}
+
+export interface CompraDeNumero {
+  e164: string
+  /** Para onde o Twilio manda resposta e opt-out do lead. Configurado na
+   *  compra, e não depois, porque um número comprado sem webhook recebe
+   *  mensagem e joga fora em silêncio. */
+  webhookSms?: string
+  /** Rótulo no console do Twilio. Sem isto vira uma lista de números sem dono. */
+  apelido?: string
+}
+
+/** Compra um número. Isto gasta dinheiro de verdade, todo mês. */
+export async function comprarNumero(
+  cred: CredenciaisTwilio,
+  c: CompraDeNumero,
+): Promise<ResultadoCompra> {
+  const corpo: Record<string, string> = { PhoneNumber: c.e164 }
+  if (c.webhookSms) {
+    corpo.SmsUrl = c.webhookSms
+    corpo.SmsMethod = 'POST'
+  }
+  if (c.apelido) corpo.FriendlyName = c.apelido
+
+  const r = await requisitar(`${base(cred)}/IncomingPhoneNumbers.json`, {
+    cabecalhos: autorizacao(cred),
+    corpo,
+    formulario: true,
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao comprar o número' }
+
+  const x = (r.corpo ?? {}) as Record<string, unknown>
+  const sid = String(x.sid ?? '')
+  if (!sid) return { ok: false, erro: 'o Twilio não devolveu o SID do número comprado' }
+
+  return {
+    ok: true,
+    numero: {
+      e164: String(x.phone_number ?? c.e164),
+      sid,
+      capacidades: capacidadesDe(x.capabilities),
+    },
+  }
+}
+
+/** Aponta (ou reaponta) o webhook de SMS de um número já comprado.
+ *
+ *  Serve para números comprados antes desta automação existir, e para quando o
+ *  domínio mudar. */
+export async function apontarWebhookSms(
+  cred: CredenciaisTwilio,
+  sid: string,
+  webhookSms: string,
+): Promise<{ ok: boolean; erro?: string }> {
+  const r = await requisitar(`${base(cred)}/IncomingPhoneNumbers/${sid}.json`, {
+    cabecalhos: autorizacao(cred),
+    corpo: { SmsUrl: webhookSms, SmsMethod: 'POST' },
+    formulario: true,
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao apontar o webhook' }
 }

@@ -37,11 +37,14 @@ export function adaptadoresDoAmbiente(
       remetente: env.EMAIL_REMETENTE ?? 'Avexa <contato@avexa.global>',
     }
   }
-  if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_REMETENTE) {
+  // Sem TWILIO_REMETENTE: o remetente normal é o número do cliente, e exigir
+  // um número global aqui deixaria o canal desligado justamente na operação
+  // multi-cliente, que é a que interessa.
+  if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
     cfg.sms = {
       accountSid: env.TWILIO_ACCOUNT_SID,
       authToken: env.TWILIO_AUTH_TOKEN,
-      remetente: env.TWILIO_REMETENTE,
+      ...(env.TWILIO_REMETENTE ? { remetente: env.TWILIO_REMETENTE } : {}),
       ...(env.TWILIO_STATUS_CALLBACK ? { statusCallback: env.TWILIO_STATUS_CALLBACK } : {}),
     }
   }

@@ -167,6 +167,7 @@ WHATSAPP_PHONE_NUMBER_ID=
 
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
+# Remetente de reserva. O normal é o número próprio de cada cliente.
 TWILIO_REMETENTE=
 TWILIO_STATUS_CALLBACK=https://$DOMINIO/api/webhooks/twilio
 

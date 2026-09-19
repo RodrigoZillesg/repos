@@ -218,7 +218,7 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
   const exigeTemplate =
     p.canal === 'whatsapp' ? p.etapa.cfg.modo !== 'Conversa livre (janela aberta)' : p.canal !== 'ligacao'
 
-  const fatos = await carregarFatosContato(db, {
+  const { fatos, remetente } = await carregarFatosContato(db, {
     clienteId: p.clienteId,
     execucaoId: p.execucaoId,
     pessoaId: p.lead.pessoaId,
@@ -339,6 +339,10 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
     tentativaId: nova!.id,
     canal: p.canal,
     destinatario: fatos.destinatario!,
+    // O número dedicado do cliente, quando ele tem um. Sem isto todo cliente
+    // falaria pelo número global, e o lead veria um remetente que não é de
+    // quem o procurou. Ausente, o adaptador cai no remetente do ambiente.
+    ...(remetente ? { remetente } : {}),
     ...(assunto ? { assunto } : {}),
     texto: corpo.texto,
     ...(modelo?.metaTemplateId ? { templateExterno: modelo.metaTemplateId } : {}),

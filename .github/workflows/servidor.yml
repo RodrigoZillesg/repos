@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -28,6 +28,14 @@ on:
         default: rodrigo.zillesg@platty.tech
       email_atual:
         description: 'Para a ação "trocar-email": o endereço que está no banco hoje'
+        type: string
+        default: ''
+      pais:
+        description: 'Para "numeros"/"comprar-numero": AU, US, ...'
+        type: string
+        default: AU
+      cliente:
+        description: 'Para "comprar-numero": slug do cliente. Vazio = vai para o pool'
         type: string
         default: ''
 
@@ -416,6 +424,32 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker e2e:ia"
+
+      # Números cadastrados e o que há à venda. Não compra nada.
+      - name: Números
+        if: inputs.acao == 'numeros'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          cd /opt/avexa-motor/app
+          compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
+          echo "== números já nossos =="
+          compose run --rm worker pnpm --filter @avexa/worker numeros listar
+          REMOTO
+
+          echo "== à venda em ${{ inputs.pais }} =="
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker numeros procurar '${{ inputs.pais }}'"
+
+      # COMPRA DE VERDADE: o número passa a custar todo mês.
+      - name: Comprar um número
+        if: inputs.acao == 'comprar-numero'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker numeros comprar \
+             '${{ inputs.pais }}' '${{ inputs.cliente }}'"
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver
       # configurado, é assim que se entra: o link não tem como sair por e-mail.
