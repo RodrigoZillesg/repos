@@ -216,6 +216,44 @@ compose run --rm worker pnpm --filter @avexa/worker acesso \
 
 O link vale 15 minutos e funciona uma vez só.
 
+## Credenciais dos fornecedores
+
+As chaves de Resend, Twilio, WhatsApp, Vapi, Gemini, Google, Calendly e HubSpot
+**não moram no repositório e não passam por conversa**. Ficam no cofre de
+secrets do GitHub (*Settings → Secrets and variables → Actions*) e vão para o
+servidor pela ação **`segredos`** do workflow *Servidor*.
+
+O caminho é: cofre do GitHub → variável de ambiente do runner → entrada padrão
+do `ssh` → `infra/segredos.sh` → `.env` do servidor (modo 600). Os valores
+nunca viram argumento de comando — argumento aparece em `ps` para qualquer
+usuário da máquina, e esta máquina é compartilhada. Nada é impresso: o log diz
+quais chaves mudaram, jamais o que elas valem.
+
+O script:
+
+- só mexe nas chaves que recebeu; o resto do `.env` fica intacto;
+- **recusa** sobrescrever `APP_SECRET` e `POSTGRES_PASSWORD` — trocar o
+  `APP_SECRET` torna ilegível todo refresh token de OAuth já gravado, e cada
+  cliente teria de reconectar;
+- pula valor vazio, para dar para configurar um fornecedor de cada vez;
+- guarda cópia do `.env` anterior e aborta sem tocar no arquivo se a reescrita
+  perder alguma chave estrutural.
+
+Secrets reconhecidos: `RESEND_API_KEY`, `EMAIL_REMETENTE`, `WHATSAPP_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_REMETENTE`, `VAPI_API_KEY`, `VAPI_ASSISTANT_ID`,
+`VAPI_PHONE_NUMBER_ID`, `GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `CALENDLY_CLIENT_ID`, `CALENDLY_CLIENT_SECRET`,
+`CALENDLY_SIGNING_KEY`, `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`.
+
+Para conferir depois, sem expor nada:
+
+- **`fornecedores`** — lista quais canais o motor enxerga (nomes, nunca
+  valores);
+- **`testar-email`** — manda um e-mail de verdade para o endereço informado.
+  Vale a pena: uma chave correta com domínio não verificado passa em qualquer
+  checagem de presença e só falha num envio real.
+
 ## Certificado TLS
 
 O certificado de `new.avexa.global` é do Let's Encrypt e vale 90 dias. A

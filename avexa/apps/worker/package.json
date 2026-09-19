@@ -15,7 +15,9 @@
     "e2e:calendly": "tsx scripts/e2e-calendly.ts",
     "e2e:entrega": "tsx scripts/e2e-entrega.ts",
     "e2e:retencao": "tsx scripts/e2e-retencao.ts",
-    "acesso": "tsx scripts/link-de-acesso.ts"
+    "acesso": "tsx scripts/link-de-acesso.ts",
+    "fornecedores": "tsx scripts/fornecedores.ts",
+    "e2e:email": "tsx scripts/e2e-email.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

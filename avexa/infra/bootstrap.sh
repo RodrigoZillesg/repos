@@ -158,7 +158,9 @@ ACME_EMAIL=dev@platty.tech
 # Preencha conforme for contratando cada fornecedor. O que ficar vazio
 # simplesmente não é usado: o canal é pulado e o motivo aparece no monitor.
 RESEND_API_KEY=
-RESEND_REMETENTE=
+# O nome da variável importa: o adaptador lê EMAIL_REMETENTE. O domínio
+# precisa estar verificado no Resend, senão o envio é recusado.
+EMAIL_REMETENTE="Avexa <contato@avexa.global>"
 
 WHATSAPP_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=

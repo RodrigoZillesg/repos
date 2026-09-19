@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -283,6 +283,77 @@ jobs:
           ls -lh /opt/avexa-motor/backups/
           df -h /opt | tail -1
           REMOTO
+
+      # Leva as credenciais dos fornecedores do cofre do GitHub para o .env do
+      # servidor. Os valores nunca passam por argumento (apareceria em `ps`),
+      # nunca são impressos, e o GitHub mascara qualquer secret que escape para
+      # o log. Um secret não cadastrado chega vazio e é simplesmente pulado —
+      # dá para configurar um fornecedor de cada vez.
+      - name: Gravar segredos
+        if: inputs.acao == 'segredos'
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_REMETENTE: ${{ secrets.TWILIO_REMETENTE }}
+          VAPI_API_KEY: ${{ secrets.VAPI_API_KEY }}
+          VAPI_ASSISTANT_ID: ${{ secrets.VAPI_ASSISTANT_ID }}
+          VAPI_PHONE_NUMBER_ID: ${{ secrets.VAPI_PHONE_NUMBER_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          CALENDLY_CLIENT_ID: ${{ secrets.CALENDLY_CLIENT_ID }}
+          CALENDLY_CLIENT_SECRET: ${{ secrets.CALENDLY_CLIENT_SECRET }}
+          CALENDLY_SIGNING_KEY: ${{ secrets.CALENDLY_SIGNING_KEY }}
+          HUBSPOT_CLIENT_ID: ${{ secrets.HUBSPOT_CLIENT_ID }}
+          HUBSPOT_CLIENT_SECRET: ${{ secrets.HUBSPOT_CLIENT_SECRET }}
+        run: |
+          scp -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy \
+            avexa/infra/segredos.sh \
+            "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}:/opt/avexa-motor/segredos.sh"
+
+          # Uma linha CHAVE=valor por vez, pela entrada padrão do ssh. O valor
+          # sai daqui direto para o stdin do script remoto: não encosta em
+          # linha de comando nem em arquivo intermediário.
+          for chave in RESEND_API_KEY EMAIL_REMETENTE \
+                       WHATSAPP_TOKEN WHATSAPP_PHONE_NUMBER_ID \
+                       TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_REMETENTE \
+                       VAPI_API_KEY VAPI_ASSISTANT_ID VAPI_PHONE_NUMBER_ID \
+                       GEMINI_API_KEY \
+                       GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
+                       CALENDLY_CLIENT_ID CALENDLY_CLIENT_SECRET CALENDLY_SIGNING_KEY \
+                       HUBSPOT_CLIENT_ID HUBSPOT_CLIENT_SECRET; do
+            valor="${!chave}"
+            if [ -n "$valor" ]; then printf '%s=%s\n' "$chave" "$valor"; fi
+          done | ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy \
+            "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "chmod 755 /opt/avexa-motor/segredos.sh && bash /opt/avexa-motor/segredos.sh"
+
+          echo "== reiniciando para o novo ambiente valer =="
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy \
+            "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --no-deps web worker && docker compose --env-file .env -f infra/docker-compose.prod.yml ps"
+
+      # Diz quais canais o motor enxerga. Nomes, nunca valores.
+      - name: Fornecedores configurados
+        if: inputs.acao == 'fornecedores'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker fornecedores"
+
+      # Manda um e-mail de verdade. Chave certa com domínio não verificado passa
+      # em toda checagem de presença e só falha num envio real — é esse caso que
+      # este passo existe para pegar.
+      - name: Testar o envio de e-mail
+        if: inputs.acao == 'testar-email'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker e2e:email '${{ inputs.email }}'"
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver
       # configurado, é assim que se entra: o link não tem como sair por e-mail.
