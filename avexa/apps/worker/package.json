@@ -20,7 +20,8 @@
     "equipe": "tsx scripts/equipe.ts",
     "e2e:email": "tsx scripts/e2e-email.ts",
     "e2e:ia": "tsx scripts/e2e-ia.ts",
-    "numeros": "tsx scripts/numeros.ts"
+    "numeros": "tsx scripts/numeros.ts",
+    "vapi": "tsx scripts/vapi-inspecionar.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

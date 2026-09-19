@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, vapi, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -36,6 +36,10 @@ on:
         default: AU
       cliente:
         description: 'Para "comprar-numero": slug do cliente. Vazio = vai para o pool'
+        type: string
+        default: ''
+      id:
+        description: 'Para "vapi": id de um agente para ver inteiro. Vazio = resumo'
         type: string
         default: ''
 
@@ -450,6 +454,15 @@ jobs:
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker numeros comprar \
              '${{ inputs.pais }}' '${{ inputs.cliente }}'"
+
+      # Só leitura na conta Vapi: entender a forma real de um agente antes de
+      # modelar o nosso. Supor forma de fornecedor já custou duas rodadas hoje.
+      - name: Inspecionar a Vapi
+        if: inputs.acao == 'vapi'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker vapi '${{ inputs.id }}'"
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver
       # configurado, é assim que se entra: o link não tem como sair por e-mail.
