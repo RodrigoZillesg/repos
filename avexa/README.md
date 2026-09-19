@@ -42,6 +42,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
     pnpm --filter @avexa/worker e2e:google
     pnpm --filter @avexa/worker e2e:calendly
     pnpm --filter @avexa/worker e2e:entrega
+    pnpm --filter @avexa/worker e2e:retencao
 
 ## Entrar no painel em desenvolvimento
 
@@ -286,6 +287,34 @@ proxy de terceiros.
 O passo a passo — chave de deploy, `infra/bootstrap.sh`, secrets, DNS — está em
 [`infra/README.md`](infra/README.md), junto com o que este arranjo **não** tem
 (réplica, staging, backup automático).
+
+## Retenção
+
+Duas colunas em `config_global` — dias de lead e dias de gravação — editáveis na
+aba Configurações. Zero, que é o padrão, significa guardar para sempre.
+
+Com um prazo, o worker roda o expurgo toda madrugada (cron do pg-boss, não
+`setInterval`: o worker reinicia a cada deploy e um temporizador na memória
+reiniciaria junto). O que ele faz:
+
+- apaga o lead e tudo que veio com ele por cascata — tentativas, entregas,
+  reuniões, mensagens — e depois as pessoas que não sustentam mais nada;
+- limpa áudio e transcrição das chamadas velhas, **mantendo** a linha da
+  chamada: duração, se atendeu e se o aviso de gravação foi emitido são a prova
+  de que a ligação aconteceu do jeito certo;
+- **não toca em lead que ainda está no fluxo.** Apagar no meio do percurso
+  mataria a execução e o lead sumiria entre um contato e o seguinte.
+
+Duas coisas que o expurgo deliberadamente **não** faz:
+
+**A supressão nunca é apagada.** A tabela guarda o telefone e o e-mail em si, não
+uma referência à pessoa, exatamente para que apagar o lead não vire autorização
+para contatar de novo quem já disse não. O `e2e:retencao` existe principalmente
+para provar isso.
+
+**O áudio no fornecedor não some.** Apagamos nossa cópia do endereço e a
+transcrição; o arquivo vive na conta de voz e obedece à retenção de lá. A tela
+diz isso na cara — uma política que só esquece o link seria meia verdade.
 
 ## Monitor
 

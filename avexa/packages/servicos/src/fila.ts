@@ -15,6 +15,8 @@ export const FILAS = {
   webhookSaida: 'webhook.saida',
   /** Põe (ou atualiza) a reunião do lead no CRM do cliente. */
   reuniaoCrm: 'crm.reuniao',
+  /** Expurgo por retenção, uma vez por dia. */
+  expurgo: 'retencao.expurgar',
 } as const
 
 export interface TrabalhoAvancar {
@@ -83,6 +85,20 @@ export async function agendarReuniaoNoCrm(leadId: string): Promise<string | null
     { leadId } satisfies TrabalhoReuniaoCrm,
     { singletonKey: leadId, retryLimit: 5, retryBackoff: true, expireInMinutes: 15 },
   )
+}
+
+/** Agenda o expurgo diário.
+ *
+ *  Pelo cron do pg-boss, não por `setInterval`: o worker reinicia a cada deploy,
+ *  e um temporizador na memória do processo reinicia junto — num dia com três
+ *  deploys, o expurgo nunca chegaria a rodar. Às 3h UTC porque é madrugada em
+ *  Sydney e em São Paulo ao mesmo tempo, e apagar meio milhão de linhas no meio
+ *  do horário de contato disputa banco com o motor.
+ *
+ *  Chamar de novo com outro horário só reescreve o agendamento. */
+export async function agendarExpurgoDiario(cron = '0 3 * * *'): Promise<void> {
+  const b = await fila()
+  await b.schedule(FILAS.expurgo, cron, {}, { singletonKey: 'expurgo', retryLimit: 2 })
 }
 
 export async function encerrarFila(): Promise<void> {

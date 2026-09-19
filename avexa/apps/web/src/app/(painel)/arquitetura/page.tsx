@@ -69,6 +69,7 @@ const REGRAS = [
   ['Só em horário útil', 'Fuso do lead. Fora da janela, a tentativa espera a manhã seguinte.'],
   ['Teto de tentativas', 'O fluxo pode pedir menos que o teto do sistema, nunca mais.'],
   ['Subfluxo não vira laço', 'Um fluxo pode chamar outro, mas o motor corta a cadeia se ela voltar ao ponto de partida.'],
+  ['Expurgo não libera ninguém', 'A retenção apaga o lead, mas nunca a supressão: quem pediu para parar continua bloqueado depois que os dados dele saem daqui.'],
   ['Entrega nunca falha calada', 'Lead que não chegou ao cliente vira registro com o motivo, e aparece no monitor. Reenvio usa sempre o mesmo id, para não duplicar lead do outro lado.'],
   ['Reunião só com horário confirmado', 'Enquanto o lead não escolher o horário, existe uma oferta, não uma reunião. E um texto que pede o link de agenda não sai sem ele.'],
 ] as const

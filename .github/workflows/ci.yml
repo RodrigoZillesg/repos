@@ -116,3 +116,8 @@ jobs:
       # conferida do outro lado como o cliente vai conferir.
       - name: Entrega ao cliente
         run: pnpm --filter @avexa/worker e2e:entrega
+
+      # A regra que, se quebrar, quebra em silêncio e contra uma pessoa: o
+      # expurgo por retenção não pode liberar quem pediu para parar.
+      - name: Retenção e expurgo
+        run: pnpm --filter @avexa/worker e2e:retencao

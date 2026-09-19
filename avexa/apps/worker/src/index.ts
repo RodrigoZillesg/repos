@@ -1,9 +1,12 @@
 import {
+  agendarExpurgoDiario,
   enviarReuniaoAoCrm,
+  expurgar,
   fila,
   FILAS,
   encerrarFila,
   type TrabalhoAvancar,
+  resumoDoExpurgo,
   type TrabalhoEvento,
   type TrabalhoReuniaoCrm,
 } from '@avexa/servicos'
@@ -64,6 +67,14 @@ async function principal(): Promise<void> {
       // `entrega`, com o motivo, e insistir não mudaria nada.
       if (!r.ok && r.reenviavel) throw new Error(r.erro ?? 'falha ao subir a reunião')
     }
+  })
+
+  // Retenção. O agendamento é idempotente: subir o worker de novo não cria um
+  // segundo expurgo, só reescreve o mesmo.
+  await agendarExpurgoDiario()
+  await b.work(FILAS.expurgo, async () => {
+    const r = await expurgar(amb.db, amb.agora())
+    console.log(`[avexa] expurgo: ${resumoDoExpurgo(r)}`)
   })
 
   const encerrar = async (sinal: string) => {
