@@ -10,6 +10,8 @@ import {
   listarFluxos,
   listarTemplates,
 } from '@/lib/dados'
+import { carregarLimites } from '@avexa/servicos'
+import { db } from '@avexa/db'
 import { Construtor } from '@/componentes/construtor'
 import { Selo } from '@/componentes/ui/cartao'
 import { salvarFluxo } from './acoes'
@@ -43,6 +45,7 @@ export default async function PaginaFluxos({
   const carregado = await carregarFluxo(escolhido.id)
   const canais = await canaisDoCliente(cli.id)
   const modelos = await listarTemplates(cli.id)
+  const limites = await carregarLimites(db())
 
   const porCanal: Record<string, string[]> = {}
   for (const m of modelos) {
@@ -105,6 +108,9 @@ export default async function PaginaFluxos({
         fluxos={fluxos.map((f) => ({ id: f.id, nome: f.nome }))}
         fluxoId={escolhido.id}
         podeEditar={s.permissoes.editarFluxos}
+        limites={limites}
+        fuso={cli.fusoHorario}
+        templatesAprovados={porCanal}
         t={t}
         aoSalvar={salvarFluxo}
       />

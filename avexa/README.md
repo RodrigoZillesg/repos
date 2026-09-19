@@ -55,6 +55,15 @@ com o motivo quando recusa (duplicado, lead velho, sem identificador). Um 4xx
 faria a plataforma do cliente marcar o webhook como quebrado, e "duplicado" não
 é falha de integração.
 
+## Simulação
+
+O botão "Rodar simulação" no construtor roda o motor de verdade — o mesmo
+`simular` que os testes de CI usam — contra o grafo que está na tela, inclusive
+alterações ainda não salvas, e mostra passo a passo o que aconteceria com cada
+uma das cinco personas de lead. Nada sai: o simulador não conhece adaptador
+nenhum. O painel mostra junto o resultado da validação, separando o que impede
+de publicar do que é só aviso.
+
 ## Modo seco
 
 Todo cliente nasce com `dry_run` ligado: o fluxo roda por inteiro, cada

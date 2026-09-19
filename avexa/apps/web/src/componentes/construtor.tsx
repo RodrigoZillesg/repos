@@ -8,8 +8,10 @@ import {
   cfgPadrao,
   type Etapa,
   type Grafo,
+  type LimitesMotor,
   type TipoEtapa,
 } from '@avexa/core'
+import { Simulacao } from '@/componentes/simulacao'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
@@ -23,6 +25,9 @@ interface Props {
   fluxos: Array<{ id: string; nome: string }>
   fluxoId: string
   podeEditar: boolean
+  limites: LimitesMotor
+  fuso: string
+  templatesAprovados: Record<string, string[]>
   t: Record<Chave, string>
   aoSalvar: (fluxoId: string, grafo: Grafo, publicar: boolean) => Promise<{ ok: boolean; erro?: string }>
 }
@@ -66,6 +71,7 @@ export function Construtor(p: Props) {
   const [sel, setSel] = useState<string | null>(p.grafoInicial[0]?.id ?? null)
   const [sujo, setSujo] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [simulando, setSimulando] = useState(false)
   const [pendente, iniciar] = useTransition()
 
   const selecionada = useMemo(() => (sel ? achar(grafo, sel) : null), [grafo, sel])
@@ -133,6 +139,11 @@ export function Construtor(p: Props) {
           {sujo && <Selo tom="alerta">alterações não salvas</Selo>}
           {aviso && <Selo tom="alerta">{aviso}</Selo>}
           <div className="ml-auto flex gap-2">
+            {/* Simula o grafo que está na tela, inclusive o que ainda não foi
+                salvo: conferir depois de publicar seria conferir com lead real. */}
+            <Botao variante="contorno" tamanho="pequeno" onClick={() => setSimulando(true)}>
+              {p.t['comum.simular']}
+            </Botao>
             <Botao
               variante="contorno"
               tamanho="pequeno"
@@ -205,6 +216,19 @@ export function Construtor(p: Props) {
           <p className="text-[13px] text-[var(--color-tinta-3)]">{p.t['fluxos.escolha']}</p>
         )}
       </aside>
+
+      {simulando && (
+        <Simulacao
+          grafo={grafo}
+          canais={p.canais}
+          templatesAprovados={p.templatesAprovados}
+          fluxosDoCliente={p.fluxos.filter((f) => f.id !== p.fluxoId).map((f) => f.nome)}
+          limites={p.limites}
+          fuso={p.fuso}
+          t={p.t}
+          aoFechar={() => setSimulando(false)}
+        />
+      )}
     </div>
   )
 }

@@ -76,7 +76,8 @@ test('as esperas respeitam a janela de contato do lead', () => {
   // Começa às 19:00: a espera de 2 horas cai na manhã seguinte, não às 21h.
   const r = simular(FLUXO, 'frio', { inicio: new Date('2026-03-10T22:00:00Z') })
   const espera = r.eventos.find((x) => x.tipo === 'espera')
-  assert.ok(espera?.detalhe?.includes('2026-03-11T13:00:00.000Z'), espera?.detalhe)
+  assert.equal(espera?.detalhe, '2 horas')
+  assert.equal(espera?.ate?.toISOString(), '2026-03-11T13:00:00.000Z')
 })
 
 test('canal não contratado é bloqueado e o fluxo segue para o próximo', () => {

@@ -30,6 +30,10 @@ export interface EventoSimulado {
   rotulo: string
   canal?: Canal
   detalhe?: string
+  /** Para uma espera: quando ela vence. Fica como Date, não como texto, para que
+   *  a tela possa mostrar no relógio do lead — que é o único relógio que importa
+   *  aqui, e o que torna "24 horas" virar sexta-feira em vez de quinta. */
+  ate?: Date
 }
 
 export interface ResultadoSimulacao {
@@ -115,7 +119,8 @@ export function simular(
         tipo: 'espera',
         etapaId: instrucao.etapa.id,
         rotulo: 'Esperar',
-        detalhe: `${instrucao.etapa.cfg.dur} → ${ate.toISOString()}`,
+        detalhe: instrucao.etapa.cfg.dur ?? '',
+        ate,
       })
       agora = ate
     } else if (instrucao.tipo === 'contatar') {
