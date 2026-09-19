@@ -1,5 +1,7 @@
 export * from './tipos.ts'
 export * from './janela.ts'
+export * from './normalizar.ts'
+export * from './optout.ts'
 export * from './etapas.ts'
 export * from './canal.ts'
 export * from './condicao.ts'
