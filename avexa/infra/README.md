@@ -208,8 +208,10 @@ compose restart worker          # depois de mexer no .env
 Primeiro acesso ao painel, sem Resend configurado:
 
 ```sh
-compose run --rm worker pnpm --filter @avexa/web acesso \
-  rodrigo@platty.tech https://app.avexa.global
+# O tsx vem da raiz: a imagem do worker não instala as dependências de apps/web.
+compose run --rm -w /app/apps/web worker \
+  /app/node_modules/.bin/tsx scripts/link-de-acesso.ts \
+  rodrigo@platty.tech https://new.avexa.global
 ```
 
 O link vale 15 minutos e funciona uma vez só.
