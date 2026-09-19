@@ -190,6 +190,9 @@ importers:
 
   packages/servicos:
     dependencies:
+      '@avexa/adapters':
+        specifier: workspace:*
+        version: link:../adapters
       '@avexa/core':
         specifier: workspace:*
         version: link:../core

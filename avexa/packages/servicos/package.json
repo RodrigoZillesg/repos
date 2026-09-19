@@ -10,13 +10,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "test": "node --test \"src/*.test.ts\""
   },
   "dependencies": {
     "@avexa/core": "workspace:*",
     "@avexa/db": "workspace:*",
     "drizzle-orm": "^0.38.3",
-    "pg-boss": "^10.1.6"
+    "pg-boss": "^10.1.6",
+    "@avexa/adapters": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

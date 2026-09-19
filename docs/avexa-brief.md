@@ -155,6 +155,7 @@ em fluxo existente.
 | 2 | Região do VPS Hostinger vs. leads AU/US | A definir — afeta latência de telefonia e postura de privacidade |
 | 3 | Retenção de dados (lead, transcrição, áudio de chamada) | A definir — implementado como política configurável, sem expurgo automático até a decisão |
 | 4 | Contas de fornecedor (Twilio, Vapi, Meta WABA, Resend, Google Cloud) | A confirmar quais já existem; o código lê tudo de variável de ambiente |
+| 5 | `APP_SECRET` em produção | Cifra os segredos de integração. Trocá-la torna ilegíveis os já gravados, e cada cliente precisa reconectar |
 
 ## 11. Próxima ação
 

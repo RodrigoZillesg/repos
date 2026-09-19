@@ -68,6 +68,7 @@ jobs:
       TWILIO_ACCOUNT_SID: AC_ci
       TWILIO_AUTH_TOKEN: ci
       TWILIO_REMETENTE: '+15550000000'
+      APP_SECRET: chave-de-ci-com-mais-de-trinta-e-dois-caracteres
 
     steps:
       - uses: actions/checkout@v4
@@ -97,3 +98,9 @@ jobs:
       # atravessando o que a ativação criou, sem ninguém tocar em DNS ou cadastro.
       - name: Ativação de cliente
         run: pnpm --filter @avexa/worker e2e:ativacao
+
+      # Contra um Google falso: o que se verifica é o nosso lado — segredo
+      # cifrado, renovação preservando o token, revogação desligando a
+      # integração e o rodízio pulando quem está ocupado.
+      - name: Integração Google
+        run: pnpm --filter @avexa/worker e2e:google

@@ -6,6 +6,7 @@ import { adaptadorVapi, type ConfigVapi } from './vapi.ts'
 import { adaptadorWhatsApp, type ConfigWhatsApp } from './whatsapp.ts'
 
 export * from './http.ts'
+export * from './google.ts'
 export * from './resend.ts'
 export * from './twilio.ts'
 export * from './vapi.ts'

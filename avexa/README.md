@@ -39,6 +39,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
     pnpm --filter @avexa/worker e2e
     pnpm --filter @avexa/worker e2e:optout
     pnpm --filter @avexa/worker e2e:ativacao
+    pnpm --filter @avexa/worker e2e:google
 
 ## Entrar no painel em desenvolvimento
 
@@ -79,6 +80,28 @@ alterações ainda não salvas, e mostra passo a passo o que aconteceria com cad
 uma das cinco personas de lead. Nada sai: o simulador não conhece adaptador
 nenhum. O painel mostra junto o resultado da validação, separando o que impede
 de publicar do que é só aviso.
+
+## Google Workspace
+
+Cada cliente conecta a própria conta pela aba Integrações. A Avexa não é dona da
+agenda nem da planilha de ninguém: guardamos só o refresh token, **cifrado em
+repouso** com `APP_SECRET` (AES-256-GCM, amarrado ao cliente e ao tipo — um
+segredo movido de um cliente para outro no banco não decifra).
+
+- **Calendar** dá vida ao nó "Agendar reunião": consulta os horários ocupados,
+  oferece um livre dentro da janela de contato do lead, faz o rodízio entre
+  consultores e cria o evento com o lead convidado e link do Meet.
+- **Sheets** dá vida ao destino "Planilha compartilhada".
+
+Escopos mínimos: `calendar.events` e `calendar.readonly` (nunca o `/auth/calendar`
+amplo, que permitiria apagar agendas do cliente) e `spreadsheets`.
+
+Um consultor que não compartilhou a agenda fica **de fora do rodízio**, não entra
+como se estivesse livre — tratar "sem permissão" como agenda vazia marcaria
+reunião em cima de compromisso existente.
+
+Acesso revogado pelo cliente desliga a integração e pede reconexão, em vez de
+tentar renovar a cada lead.
 
 ## Monitor
 

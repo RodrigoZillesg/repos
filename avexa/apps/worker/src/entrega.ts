@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { requisitar, adaptadorResend } from '@avexa/adapters'
 import { integracao as tIntegracao, lead as tLead } from '@avexa/db'
+import { registrarNaPlanilha } from '@avexa/servicos'
 import type { Ambiente } from './contexto.ts'
 
 /** Entrega do lead qualificado onde o cliente trabalha.
@@ -104,8 +105,21 @@ export async function entregarLead(amb: Ambiente, p: PedidoEntrega): Promise<voi
     return
   }
 
-  // google_sheets exige OAuth do Workspace, que ainda não está ligado. Não
-  // fingimos entrega: o destino fica sem ação e isso aparece no registro.
+  if (tipo === 'google_sheets') {
+    const utm = (ld.utm ?? {}) as Record<string, string>
+    await registrarNaPlanilha(amb.db, p.clienteId, [
+      ld.criadoEm.toISOString(),
+      ld.nome,
+      ld.telefone,
+      ld.email,
+      ld.score,
+      ld.scoreMotivo,
+      ld.resumo,
+      (ld.etiquetas ?? []).join(', '),
+      utm.utm_source ?? null,
+      utm.utm_campaign ?? null,
+    ])
+  }
 }
 
 export interface PedidoWebhookSaida {

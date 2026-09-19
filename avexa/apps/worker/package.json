@@ -10,7 +10,8 @@
     "e2e": "tsx scripts/e2e.ts",
     "e2e:optout": "tsx scripts/e2e-optout.ts",
     "e2e:ativacao": "tsx scripts/e2e-ativacao.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "e2e:google": "tsx scripts/e2e-google.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

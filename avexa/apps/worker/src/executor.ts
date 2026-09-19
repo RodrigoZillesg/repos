@@ -24,7 +24,12 @@ import {
   template as tTemplate,
   tentativa as tTentativa,
 } from '@avexa/db'
-import { agendarAvanco, carregarFatosContato, carregarLimites } from '@avexa/servicos'
+import {
+  agendarAvanco,
+  agendarReuniao,
+  carregarFatosContato,
+  carregarLimites,
+} from '@avexa/servicos'
 import { qualificar } from '@avexa/ia'
 import type { Ambiente } from './contexto.ts'
 import { entregarLead, dispararWebhookSaida } from './entrega.ts'
@@ -142,6 +147,7 @@ export async function avancarExecucao(amb: Ambiente, execucaoId: string): Promis
         clienteId: cli.id,
         execucaoId,
         seco,
+        limites,
       })
     }
 
@@ -362,6 +368,7 @@ interface PedidoAcao {
   clienteId: string
   execucaoId: string
   seco: boolean
+  limites: LimitesMotor
 }
 
 async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
@@ -421,9 +428,52 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       })
       return
 
+    case 'agendar': {
+      // Sem e-mail não há como convidar ninguém. O fluxo segue: o lead ainda
+      // será entregue ao time, que agenda por fora.
+      if (!p.lead.email) {
+        p.contexto.agendamento = { ok: false, motivo: 'lead sem e-mail' }
+        return
+      }
+
+      const duracao = Number((p.etapa.cfg.dur ?? '30 minutos').split(' ')[0])
+      const lembrete =
+        p.etapa.cfg.lembrete === '1 hora' ? 60 : p.etapa.cfg.lembrete === '24 horas' ? 1440 : undefined
+
+      const r = await agendarReuniao(amb.db, {
+        clienteId: p.clienteId,
+        titulo: `${p.clienteNome} · conversa com ${p.lead.nome ?? 'lead'}`,
+        descricao: p.lead.resumo ?? '',
+        duracaoMin: duracao,
+        ...(lembrete !== undefined ? { lembreteMin: lembrete } : {}),
+        emailDoLead: p.lead.email,
+        fusoDoLead: p.lead.fusoHorario ?? 'Australia/Sydney',
+        limites: p.limites,
+        rodizio: p.etapa.cfg.agenda === 'Rodízio entre consultores',
+        agora: amb.agora(),
+      })
+
+      if (r.ok) {
+        p.contexto.agendamento = {
+          ok: true,
+          inicio: r.inicio.toISOString(),
+          consultor: r.consultor,
+          ...(r.meet ? { meet: r.meet } : {}),
+        }
+        p.contexto.qualificado = true
+        await amb.db
+          .update(tLead)
+          .set({ etiquetas: [...(p.lead.etiquetas ?? []), 'reuniao-agendada'] })
+          .where(eq(tLead.id, p.lead.id))
+      } else {
+        // Não fingimos que agendou. O motivo fica no contexto e o fluxo segue
+        // para a entrega, onde alguém do time resolve na mão.
+        p.contexto.agendamento = { ok: false, motivo: r.erro }
+      }
+      return
+    }
+
     default:
-      // 'agendar' ainda não tem integração de calendário ligada. Não fingimos
-      // que agendou: o passo é registrado e o fluxo segue.
       return
   }
 }

@@ -1,5 +1,6 @@
 export * from './tipos.ts'
 export * from './janela.ts'
+export * from './agenda.ts'
 export * from './normalizar.ts'
 export * from './optout.ts'
 export * from './template.ts'
