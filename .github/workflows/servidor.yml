@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -242,6 +242,46 @@ jobs:
           echo "== validade agora =="
           echo | openssl s_client -connect new.avexa.global:443 -servername new.avexa.global 2>/dev/null \
             | openssl x509 -noout -dates -subject
+          REMOTO
+
+      # Instala o backup diário do Postgres. Mesmo arranjo da renovação: um
+      # script em /opt/avexa-motor e uma linha no crontab do usuário de deploy.
+      # Nada de sistema, nada do outro produto.
+      - name: Instalar o backup automático
+        if: inputs.acao == 'backup-automatico'
+        run: |
+          scp -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy \
+            avexa/infra/backup.sh \
+            "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}:/opt/avexa-motor/backup.sh"
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          chmod 755 /opt/avexa-motor/backup.sh
+
+          # 04h07: fora do horário em que alguém está falando com lead, e fora
+          # do minuto cheio, onde todo cron do mundo se acumula.
+          linha='7 4 * * * /opt/avexa-motor/backup.sh >> /opt/avexa-motor/backup.log 2>&1'
+          atual=$(crontab -l 2>/dev/null | grep -v '/opt/avexa-motor/backup.sh' || true)
+          printf '%s\n%s\n' "$atual" "$linha" | sed '/^$/d' | crontab -
+
+          echo "== crontab do usuário de deploy =="
+          crontab -l
+
+          echo
+          echo "== ensaio: tira um backup agora =="
+          /opt/avexa-motor/backup.sh
+          ls -lh /opt/avexa-motor/backups/
+          REMOTO
+
+      # Tira um backup agora, à mão.
+      - name: Backup agora
+        if: inputs.acao == 'backup'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          /opt/avexa-motor/backup.sh
+          echo "== backups guardados =="
+          ls -lh /opt/avexa-motor/backups/
+          df -h /opt | tail -1
           REMOTO
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver

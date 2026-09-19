@@ -242,15 +242,36 @@ Para renovar à mão, ou só conferir que o mecanismo funciona, use a ação
 ## Backup
 
 O que não pode ser perdido é o volume do Postgres — leads, execuções, supressão
-e os segredos cifrados das integrações:
+e os segredos cifrados das integrações. Perder isso significa cada cliente
+reconectar Google, Calendly e HubSpot na mão.
+
+O backup diário se instala uma vez, pela ação **`backup-automatico`** do
+workflow *Servidor*:
+
+- `/opt/avexa-motor/backup.sh` — `pg_dump` comprimido em
+  `/opt/avexa-motor/backups/`, escrito num arquivo parcial e só renomeado no
+  fim (dump interrompido pela metade com nome de backup bom é pior que backup
+  nenhum), com o tamanho conferido e os arquivos com mais de 14 dias apagados;
+- uma linha no crontab do usuário `avexa`, às 04h07.
+
+O contêiner do Postgres é achado por `docker compose ps` dentro do projeto
+`avexa-motor`, então o banco do outro produto não entra nem por engano.
+
+Para tirar um backup agora, ou conferir o que está guardado, use a ação
+**`backup`**.
+
+Restaurar:
 
 ```sh
-docker exec avexa-motor-postgres-1 pg_dump -U avexa avexa \
-  | gzip > /opt/avexa-motor/backups/avexa-$(date +%F).sql.gz
+gunzip -c /opt/avexa-motor/backups/avexa-AAAA-MM-DD-HHMM.sql.gz \
+  | compose exec -T postgres psql -U avexa -d avexa
 ```
 
-Vale pôr no cron e mandar para fora da máquina. Backup que mora no mesmo disco
-que o banco não é backup.
+> **Ainda falta a cópia de fora.** Tudo isto vive no mesmo disco do banco, e
+> backup que mora no mesmo disco que o banco não é backup: protege contra
+> `DROP TABLE` e migração ruim, não contra a máquina morrer. O passo que falta
+> é mandar `backups/` para um bucket (S3, R2, Backblaze) no fim do
+> `backup.sh` — são três linhas e uma credencial.
 
 ## Desfazer tudo
 
@@ -270,7 +291,8 @@ Dito na cara, para ninguém descobrir no dia errado:
 
 - **Sem réplica e sem failover.** Uma máquina. Se ela cair, o Avexa cai junto —
   os leads ficam na fila do cliente, não se perdem, mas ninguém é contatado.
-- **Backup não está automatizado**, só documentado acima.
+- **O backup não sai da máquina.** É diário e automático, mas mora no mesmo
+  disco do banco. Se o VPS morrer, morre junto.
 - **O certificado do outro produto (`admin.avexa.global`) não se renova
   sozinho.** O nosso sim, mas aquele não é nosso para consertar.
 - **Sem staging.** O deploy vai direto para produção. Os testes e os e2e do CI
