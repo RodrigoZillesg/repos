@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -19,9 +19,13 @@ on:
         options: [avexa, root]
         default: avexa
       servico:
-        description: 'Para a ação "logs": web, worker, postgres ou caddy'
+        description: 'Para a ação "logs": web, worker ou postgres'
         type: string
         default: worker
+      email:
+        description: 'Para a ação "acesso": de quem é o link'
+        type: string
+        default: rodrigo@platty.tech
 
 concurrency:
   group: servidor
@@ -196,6 +200,30 @@ jobs:
 
           echo "== certificados agora =="
           ls -1 /srv/avexa/nginx/certbot/conf/live/
+          REMOTO
+
+      # Link mágico de entrada no painel. Enquanto o Resend não estiver
+      # configurado, é assim que se entra: o link não tem como sair por e-mail.
+      - name: Link de acesso
+        if: inputs.acao == 'acesso'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/web acesso '${{ inputs.email }}' https://new.avexa.global"
+
+      # A verificação de fumaça do deploy entra um lead de verdade pelo webhook
+      # — é o único jeito de provar que a reescrita do nginx e a ingestão
+      # funcionam de ponta a ponta. Dado de teste não mora em produção.
+      - name: Limpar os leads de verificação
+        if: inputs.acao == 'limpar-verificacao'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          cd /opt/avexa-motor/app
+          docker compose --env-file .env -f infra/docker-compose.prod.yml exec -T postgres \
+            psql -U avexa -d avexa -c "select nome, email from lead where email in ('verificacao@platty.tech','tls@platty.tech')" \
+                                  -c "delete from lead where email in ('verificacao@platty.tech','tls@platty.tech')" \
+                                  -c "select count(*) as leads_restantes from lead"
           REMOTO
 
       - name: Logs
