@@ -71,7 +71,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
           set -e
-          cd /opt/avexa/app 2>/dev/null || { echo "Avexa ainda não foi instalado nesta máquina."; exit 0; }
+          cd /opt/avexa-motor/app 2>/dev/null || { echo "Avexa ainda não foi instalado nesta máquina."; exit 0; }
           docker compose --env-file .env -f infra/docker-compose.prod.yml ps
           echo
           echo "--- disco ---"; df -h / | tail -1
@@ -82,4 +82,4 @@ jobs:
         if: inputs.acao == 'logs'
         run: |
           ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
-            "cd /opt/avexa/app && docker compose --env-file .env -f infra/docker-compose.prod.yml logs --tail 200 '${{ inputs.servico }}'"
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml logs --tail 200 '${{ inputs.servico }}'"

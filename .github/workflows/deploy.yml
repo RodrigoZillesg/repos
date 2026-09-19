@@ -61,18 +61,18 @@ jobs:
             --exclude '**/.next' \
             --exclude '.env' \
             avexa/ \
-            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avexa/app/"
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avexa-motor/app/"
 
       - name: Construir e subir
         run: |
           ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            'bash /opt/avexa/app/infra/deploy-remoto.sh'
+            'bash /opt/avexa-motor/app/infra/deploy-remoto.sh'
 
       - name: Seed (primeira vez)
         if: inputs.seed
         run: |
           ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            'cd /opt/avexa/app && docker compose --env-file .env -f infra/docker-compose.prod.yml run --rm worker pnpm db:seed'
+            'cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml run --rm worker pnpm db:seed'
 
       # O deploy-remoto.sh já conferiu o painel por dentro, na porta de
       # loopback. Este passo olha o domínio público, que depende de DNS e do

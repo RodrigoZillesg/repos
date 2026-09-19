@@ -75,9 +75,10 @@ fi
 
 titulo "Já existe algo chamado avexa?"
 id avexa >/dev/null 2>&1 && nota "usuário avexa EXISTE" || nota "usuário avexa não existe"
-[[ -e /opt/avexa ]] && nota "/opt/avexa EXISTE — conteúdo: $(ls -A /opt/avexa 2>/dev/null | tr '\n' ' ')" || nota "/opt/avexa não existe"
-docker ps -a --filter 'label=com.docker.compose.project=avexa' --format '   {{.Names}}' 2>/dev/null | grep . \
-  && nota "^ já há contêineres do projeto avexa" || nota "nenhum contêiner do projeto avexa"
+[[ -e /opt/avexa-motor ]] && nota "/opt/avexa-motor EXISTE — conteúdo: $(ls -A /opt/avexa-motor 2>/dev/null | tr '\n' ' ')" || nota "/opt/avexa-motor não existe"
+[[ -e /opt/avexa ]] && nota "ATENÇÃO: /opt/avexa é de OUTRO projeto — não tocar"
+docker ps -a --filter 'label=com.docker.compose.project=avexa-motor' --format '   {{.Names}}' 2>/dev/null | grep . \
+  && nota "^ já há contêineres do projeto avexa-motor" || nota "nenhum contêiner do projeto avexa-motor"
 
 titulo "Quem já mora aqui (para não pisar em nada)"
 if [[ -d /opt/avexa/.git ]]; then

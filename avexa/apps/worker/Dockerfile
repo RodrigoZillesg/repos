@@ -19,7 +19,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 FROM base AS runtime
 # Rótulo para a limpeza pós-deploy não encostar em imagem de outro projeto
 # que divida esta máquina.
-LABEL projeto=avexa
+LABEL projeto=avexa-motor
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages ./packages
 COPY --from=deps /app/apps ./apps

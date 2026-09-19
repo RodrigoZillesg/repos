@@ -5,16 +5,16 @@
 # clássica (o terminador com espaço à frente não fecha nada), e assim dá para
 # rodar o mesmo deploy à mão quando o GitHub estiver fora do ar.
 #
-#   bash /opt/avexa/app/infra/deploy-remoto.sh
+#   bash /opt/avexa-motor/app/infra/deploy-remoto.sh
 #
 # Nada aqui toca em contêiner, imagem, volume ou porta que não seja do projeto
 # `avexa`. A máquina pode estar servindo outras coisas.
 set -euo pipefail
 
-cd /opt/avexa/app
+cd /opt/avexa-motor/app
 
 if [[ ! -f .env ]]; then
-  echo "erro: /opt/avexa/app/.env não existe — rode o infra/bootstrap.sh antes" >&2
+  echo "erro: /opt/avexa-motor/app/.env não existe — rode o infra/bootstrap.sh antes" >&2
   exit 1
 fi
 
@@ -30,7 +30,7 @@ if [[ "$PERFIL_PROXY" == caddy ]]; then
   # agora alguém pode ter posto um nginx de pé — e subir o nosso Caddy em cima
   # disso tira do ar o site que está funcionando. Confere de novo, toda vez.
   nosso_caddy="$(docker ps -q \
-    --filter 'label=com.docker.compose.project=avexa' \
+    --filter 'label=com.docker.compose.project=avexa-motor' \
     --filter 'name=caddy' 2>/dev/null)"
   if [[ -z "$nosso_caddy" ]] && ss -lntH 'sport = :443' 2>/dev/null | grep -q .; then
     echo "erro: PERFIL_PROXY=caddy, mas a porta 443 já está ocupada:" >&2
@@ -63,7 +63,7 @@ compose up -d --remove-orphans
 
 # Limpeza restrita ao que nós construímos. `docker image prune` sem filtro
 # apagaria camadas soltas de outros projetos da máquina.
-docker image prune -f --filter 'label=projeto=avexa' >/dev/null 2>&1 || true
+docker image prune -f --filter 'label=projeto=avexa-motor' >/dev/null 2>&1 || true
 
 compose ps
 

@@ -5,14 +5,21 @@ Avexa **conviver**, não para tomar conta: contêineres com prefixo próprio,
 volumes próprios, rede própria, e nenhuma mudança em estado global da máquina
 sem você pedir explicitamente.
 
+> **Esta máquina não é só nossa.** O diagnóstico de 19/09 encontrou outro
+> produto chamado Avexa já no ar — `github.com/andreplattytech/avexa` em
+> `/opt/avexa`, cinco projetos compose e um nginx servindo `avexa.global`,
+> `admin.avexa.global` e `admin-staging.avexa.global`. Por isso o motor de
+> outreach instala em **`/opt/avexa-motor`**, com projeto compose
+> `avexa-motor`, e nunca encosta em `/opt/avexa`.
+
 O que o Avexa cria, e nada além disso:
 
 | | |
 | --- | --- |
 | Usuário | `avexa` (no grupo `docker`) |
-| Diretório | `/opt/avexa` |
-| Contêineres | `avexa-postgres-1`, `avexa-web-1`, `avexa-worker-1` (+ `avexa-caddy-1` se for o caso) |
-| Volumes | `avexa_dados-pg` (+ `avexa_caddy-dados`, `avexa_caddy-config`) |
+| Diretório | `/opt/avexa-motor` |
+| Contêineres | `avexa-motor-postgres-1`, `avexa-motor-web-1`, `avexa-motor-worker-1` |
+| Volumes | `avexa-motor_dados-pg` |
 | Portas | **nenhuma** na internet no perfil `externo`; só `127.0.0.1:3001` |
 
 O que ele **não** toca sem `--firewall` / `--fail2ban`: ufw, fail2ban, sshd,
@@ -186,7 +193,7 @@ Sem abrir terminal, pelo workflow **Servidor**:
 
 ## Quando precisar mexer à mão
 
-De `/opt/avexa/app`, como `avexa`:
+De `/opt/avexa-motor/app`, como `avexa`:
 
 ```sh
 compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
@@ -213,8 +220,8 @@ O que não pode ser perdido é o volume do Postgres — leads, execuções, supr
 e os segredos cifrados das integrações:
 
 ```sh
-docker exec avexa-postgres-1 pg_dump -U avexa avexa \
-  | gzip > /opt/avexa/backups/avexa-$(date +%F).sql.gz
+docker exec avexa-motor-postgres-1 pg_dump -U avexa avexa \
+  | gzip > /opt/avexa-motor/backups/avexa-$(date +%F).sql.gz
 ```
 
 Vale pôr no cron e mandar para fora da máquina. Backup que mora no mesmo disco
@@ -225,10 +232,10 @@ que o banco não é backup.
 Se precisar tirar o Avexa da máquina sem tocar no resto:
 
 ```sh
-cd /opt/avexa/app
+cd /opt/avexa-motor/app
 docker compose --env-file .env -f infra/docker-compose.prod.yml down   # sem -v: o banco fica
-docker volume rm avexa_dados-pg                                        # isto apaga os leads
-rm -rf /opt/avexa
+docker volume rm avexa-motor_dados-pg                                        # isto apaga os leads
+rm -rf /opt/avexa-motor
 deluser avexa
 ```
 

@@ -20,7 +20,7 @@ CHAVE_PUBLICA=""
 MEXER_FIREWALL=0
 MEXER_FAIL2BAN=0
 USUARIO="${AVEXA_USER:-avexa}"
-RAIZ="/opt/avexa"
+RAIZ="/opt/avexa-motor"
 
 for arg in "$@"; do
   case "$arg" in
