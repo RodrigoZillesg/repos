@@ -85,7 +85,8 @@ jobs:
         if: inputs.acao == 'nginx'
         run: |
           ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
-          set -e
+          # Sem set -e: aqui é inspeção. Um ls que falha é informação, não motivo
+          # para abortar e perder o resto do retrato.
           proxy=$(docker ps --format '{{.Names}}' | grep -Ei 'nginx|caddy|traefik' | head -1)
           echo "proxy: $proxy"
           echo
@@ -98,14 +99,22 @@ jobs:
           docker exec "$proxy" sh -c 'grep -rn "include" /etc/nginx/nginx.conf | head -10'
           echo
           echo "=== arquivos de site ==="
-          docker exec "$proxy" sh -c 'ls -la /etc/nginx/conf.d/ 2>/dev/null; ls -la /etc/nginx/sites-enabled/ 2>/dev/null'
+          docker exec "$proxy" sh -c 'ls -la /etc/nginx/conf.d/ /etc/nginx/conf.d/clients/ 2>&1' || true
           echo
-          echo "=== onde ficam os certificados ==="
-          docker exec "$proxy" sh -c 'ls -la /etc/letsencrypt/live/ 2>/dev/null || echo "sem /etc/letsencrypt no contêiner"'
+          echo "=== certificados que já existem ==="
+          ls -1 /srv/avexa/nginx/certbot/conf/live/ 2>&1 || true
           echo
           echo "=== quem renova o TLS ==="
-          ls -la /opt/avexa/infra 2>/dev/null | head -20
-          crontab -l 2>/dev/null | grep -i -E 'certbot|acme|renew' || echo "nada de certbot no crontab do root"
+          docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' | grep -i certbot || echo "nenhum contêiner certbot"
+          crontab -l 2>/dev/null | grep -i -E 'certbot|acme|renew' || echo "nada no crontab do root"
+          ls -1 /etc/cron.d/ 2>/dev/null | head || true
+          echo
+          echo "=== como os outros se ligam ao proxy ==="
+          docker network inspect nginx_public --format '{{range .Containers}}{{.Name}} {{end}}' 2>&1 || true
+          grep -rn "nginx_public" /srv/avexa/*.yml /srv/avexa/**/*.yml 2>/dev/null | head -6 || true
+          echo
+          echo "=== um exemplo de server block deles ==="
+          sed -n '1,40p' /srv/avexa/nginx/conf.d/routes.conf 2>&1 || true
           REMOTO
 
       - name: Logs
