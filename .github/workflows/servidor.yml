@@ -1,0 +1,85 @@
+name: Servidor
+
+# As mãos remotas. Este container onde o Claude roda não alcança a porta 22 —
+# o proxy do ambiente aceita o CONNECT e derruba tudo que não é TLS. O runner
+# do GitHub alcança. Então é daqui que se olha e se mexe no VPS.
+#
+# Nada aqui precisa de terminal humano: cada ação sai no log do job.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: 'O que fazer no servidor'
+        type: choice
+        options: [diagnostico, bootstrap, logs, estado]
+        default: diagnostico
+      usuario:
+        description: 'Entrar como (root só para o bootstrap inicial)'
+        type: choice
+        options: [avexa, root]
+        default: avexa
+      servico:
+        description: 'Para a ação "logs": web, worker, postgres ou caddy'
+        type: string
+        default: worker
+
+concurrency:
+  group: servidor
+  cancel-in-progress: false
+
+jobs:
+  servidor:
+    name: ${{ inputs.acao }}
+    runs-on: ubuntu-latest
+    environment: producao
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chave
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # A pública sai da privada. Um segredo a menos para alguém cadastrar
+          # à mão, e um a menos para circular por aí.
+          ssh-keygen -y -f ~/.ssh/id_deploy > ~/.ssh/id_deploy.pub
+          echo "chave pública derivada: $(cut -c1-40 ~/.ssh/id_deploy.pub)…"
+
+      - name: Diagnóstico
+        if: inputs.acao == 'diagnostico'
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            'bash -s' < avexa/infra/diagnostico.sh
+
+      - name: Bootstrap
+        if: inputs.acao == 'bootstrap'
+        run: |
+          if [ "${{ inputs.usuario }}" != "root" ]; then
+            echo "::error::o bootstrap precisa de root — rode esta ação com usuario=root"
+            exit 1
+          fi
+          # A chave passa como argumento: é a pública derivada acima, a mesma
+          # que já abriu esta sessão. O script recusa qualquer coisa que pareça
+          # chave privada.
+          ssh -i ~/.ssh/id_deploy "root@${{ secrets.VPS_HOST }}" \
+            "bash -s -- '$(cat ~/.ssh/id_deploy.pub)'" < avexa/infra/bootstrap.sh
+
+      - name: Estado dos contêineres
+        if: inputs.acao == 'estado'
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -e
+          cd /opt/avexa/app 2>/dev/null || { echo "Avexa ainda não foi instalado nesta máquina."; exit 0; }
+          docker compose --env-file .env -f infra/docker-compose.prod.yml ps
+          echo
+          echo "--- disco ---"; df -h / | tail -1
+          echo "--- memória ---"; free -h | awk '/^Mem:/ {print $3 " de " $2}'
+          REMOTO
+
+      - name: Logs
+        if: inputs.acao == 'logs'
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa/app && docker compose --env-file .env -f infra/docker-compose.prod.yml logs --tail 200 '${{ inputs.servico }}'"

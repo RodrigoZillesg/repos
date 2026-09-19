@@ -18,12 +18,27 @@ O que o Avexa cria, e nada além disso:
 O que ele **não** toca sem `--firewall` / `--fail2ban`: ufw, fail2ban, sshd,
 nginx ou qualquer outro serviço que já esteja de pé.
 
-## Antes de tudo: olhar a máquina
+## Quem roda o quê
 
-```sh
-bash diagnostico.sh
-```
+O container onde o Claude trabalha **não alcança a porta 22**: o proxy do
+ambiente aceita o `CONNECT` e derruba tudo que não é TLS (dá para comprovar
+contra `github.com:22`, que responde banner na hora e ali fecha na cara). O
+runner do GitHub alcança. Por isso existe o workflow **Servidor**
+(`.github/workflows/servidor.yml`): ele é o terminal remoto, e cada ação sai no
+log do job.
 
+| Passo | Quem faz |
+| --- | --- |
+| Gerar a chave e cadastrar a pública no VPS | **você**, uma vez |
+| Cadastrar os três secrets no GitHub | **você**, uma vez |
+| Diagnóstico, bootstrap, deploy, logs, estado | pela aba Actions |
+
+O primeiro passo não tem como ser de outra pessoa: é ele que concede o acesso,
+e ninguém cria sozinho uma permissão que não tem.
+
+## Olhar a máquina antes de mexer
+
+Pelo workflow **Servidor › diagnostico** (ou, à mão, `bash diagnostico.sh`).
 Não muda nada — só lê. Diz quem ocupa 80 e 443, o que já roda em Docker, o
 estado do firewall e o que escuta fora do loopback. É a saída dele que decide o
 perfil abaixo.
@@ -53,7 +68,28 @@ ssh-keygen -t ed25519 -C 'deploy@avexa' -f ~/.ssh/avexa_deploy -N ''
 A **privada** (`~/.ssh/avexa_deploy`) nunca sai da sua máquina, a não ser para o
 secret do GitHub. Não cole em chat, não mande por e-mail, não ponha no servidor.
 
-### 2. Preparar o servidor
+### 2. Dar o acesso
+
+No console web da Hostinger (ou `ssh root@31.97.128.229`), uma linha:
+
+```sh
+mkdir -p ~/.ssh && echo "COLE_AQUI_A_CHAVE_PUBLICA" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+```
+
+É só isto. O `bootstrap.sh` em si pode rodar pelo workflow **Servidor ›
+bootstrap** com `usuario=root` — ele deriva a chave pública da privada que já
+está no secret, cria o usuário `avexa` com essa mesma chave e nunca mais precisa
+de root.
+
+Depois que o bootstrap passar, **apague a chave do root** e deixe só a do
+`avexa`: deploy não precisa de root, e chave de deploy no root transforma
+qualquer vazamento em acesso total.
+
+```sh
+> ~/.ssh/authorized_keys   # como root, depois de conferir que o avexa funciona
+```
+
+Se preferir fazer tudo à mão, é o mesmo script:
 
 ```sh
 bash bootstrap.sh "$(cat ~/.ssh/avexa_deploy.pub)"
@@ -137,6 +173,16 @@ O workflow roda typecheck e testes antes de tocar no servidor, envia por
 verificação é do nosso contêiner, não do proxy de terceiros. Depois ele olha o
 domínio público e, se não responder, avisa sem falhar: DNS e proxy alheio não
 são responsabilidade do deploy.
+
+## Ver o que está acontecendo lá
+
+Sem abrir terminal, pelo workflow **Servidor**:
+
+| Ação | O que mostra |
+| --- | --- |
+| `diagnostico` | portas, Docker, firewall, o que um firewall cortaria |
+| `estado` | contêineres de pé, disco e memória |
+| `logs` | últimas 200 linhas de `web`, `worker`, `postgres` ou `caddy` |
 
 ## Quando precisar mexer à mão
 
