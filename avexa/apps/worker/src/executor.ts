@@ -218,7 +218,7 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
   const exigeTemplate =
     p.canal === 'whatsapp' ? p.etapa.cfg.modo !== 'Conversa livre (janela aberta)' : p.canal !== 'ligacao'
 
-  const { fatos, remetente } = await carregarFatosContato(db, {
+  const { fatos, remetente, vozId } = await carregarFatosContato(db, {
     clienteId: p.clienteId,
     execucaoId: p.execucaoId,
     pessoaId: p.lead.pessoaId,
@@ -349,7 +349,7 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
     variaveis: Object.fromEntries(
       Object.entries(modelo?.variaveis ?? {}).map(([k, v]) => [k, String(v)]),
     ),
-    opcoes: opcoesDoCanal(p.etapa, p.canal),
+    opcoes: opcoesDoCanal(p.etapa, p.canal, vozId),
   })
 
   await db
@@ -371,7 +371,11 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
   return { acao: 'enviou' }
 }
 
-function opcoesDoCanal(etapa: Etapa, canal: Canal): Record<string, unknown> {
+function opcoesDoCanal(
+  etapa: Etapa,
+  canal: Canal,
+  vozId: string | null,
+): Record<string, unknown> {
   if (canal === 'email') {
     return { replyTo: etapa.cfg.replyto === 'Time do cliente' ? undefined : undefined }
   }
@@ -380,6 +384,10 @@ function opcoesDoCanal(etapa: Etapa, canal: Canal): Record<string, unknown> {
       roteiro: etapa.cfg.roteiro ?? '',
       tempoToqueSegundos: Number((etapa.cfg.ring ?? '30 segundos').split(' ')[0]),
       deixarRecado: etapa.cfg.vm === 'Deixar recado',
+      // O número próprio do cliente na Vapi. Ausente, a ligação sai do número
+      // global — o que é aceitável só enquanto o número dele não foi importado
+      // para lá.
+      ...(vozId ? { phoneNumberId: vozId } : {}),
     }
   }
   return {}

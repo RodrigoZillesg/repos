@@ -31,6 +31,7 @@ export interface ContextoFatos {
 export interface FatosDoContato {
   fatos: FatosContato
   remetente: string | null
+  vozId: string | null
 }
 
 export async function carregarFatosContato(db: Db, c: ContextoFatos): Promise<FatosDoContato> {
@@ -54,7 +55,7 @@ export async function carregarFatosContato(db: Db, c: ContextoFatos): Promise<Fa
     ...(c.templateAprovado !== undefined ? { templateAprovado: c.templateAprovado } : {}),
   }
 
-  return { fatos, remetente: canal.remetente }
+  return { fatos, remetente: canal.remetente, vozId: canal.vozId }
 }
 
 /** Respondeu em qualquer canal desta execução. */
@@ -67,12 +68,26 @@ async function jaRespondeu(db: Db, execucaoId: string): Promise<boolean> {
   return linhas.length > 0
 }
 
+/** Canais em que cada cliente fala do PRÓPRIO número.
+ *
+ *  Só telefonia. O WhatsApp sai sempre do número único da Avexa (a Cloud API
+ *  manda pelo phoneNumberId da nossa WABA, e não há outro para mandar), e o
+ *  e-mail sai sempre do remetente único verificado no Resend. A lista está
+ *  aqui, explícita, para que um `config.numero` gravado por engano num desses
+ *  canais não consiga trocar o remetente — no WhatsApp isso não daria erro
+ *  claro, daria mensagem não entregue. */
+const CANAIS_COM_NUMERO_PROPRIO = new Set<Canal>(['sms', 'ligacao'])
+
 export interface CanalDoCliente {
   ativo: boolean
-  /** O número dedicado deste cliente, quando existe. Cada cliente fala do
-   *  próprio número: o lead precisa reconhecer quem está ligando, e o SMS tem
-   *  que sair do mesmo número da ligação. */
+  /** O número dedicado deste cliente, quando existe e quando o canal é de
+   *  telefonia. O lead precisa reconhecer quem está ligando, e o SMS tem que
+   *  sair do mesmo número da ligação. */
   remetente: string | null
+  /** Id do número na Vapi. A ligação não sai por E.164: a Vapi identifica o
+   *  número por id próprio, e o número comprado no Twilio só serve para voz
+   *  depois de importado lá. */
+  vozId: string | null
 }
 
 /** Estado e ajustes do canal para este cliente.
@@ -91,10 +106,12 @@ export async function canalDoCliente(
     .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, canal)))
     .limit(1)
 
-  const numero = linha?.config?.numero
+  const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
   return {
     ativo: linha?.ativo ?? false,
-    remetente: typeof numero === 'string' && numero.trim() ? numero.trim() : null,
+    remetente: CANAIS_COM_NUMERO_PROPRIO.has(canal) ? texto(linha?.config?.numero) : null,
+    vozId: canal === 'ligacao' ? texto(linha?.config?.vozId) : null,
   }
 }
 
