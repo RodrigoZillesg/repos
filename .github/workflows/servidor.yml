@@ -41,7 +41,19 @@ jobs:
           install -d -m 700 ~/.ssh
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # keyscan falha por timeout de vez em quando (o servidor demora, o
+          # sshd limita conexões simultâneas). Antes isso derrubava o passo
+          # inteiro por causa do `bash -e`. Tenta algumas vezes; se não vier,
+          # o accept-new faz a mesma confiança-no-primeiro-uso na hora de
+          # conectar, que é exatamente o que o keyscan já fazia.
+          for tentativa in 1 2 3; do
+            if ssh-keyscan -T 10 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null; then
+              echo "identidade do servidor registrada"
+              break
+            fi
+            echo "keyscan falhou (tentativa $tentativa)"
+            sleep 5
+          done
           # A pública sai da privada. Um segredo a menos para alguém cadastrar
           # à mão, e um a menos para circular por aí.
           ssh-keygen -y -f ~/.ssh/id_deploy > ~/.ssh/id_deploy.pub
@@ -50,7 +62,7 @@ jobs:
       - name: Diagnóstico
         if: inputs.acao == 'diagnostico'
         run: |
-          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             'bash -s' < avexa/infra/diagnostico.sh
 
       - name: Bootstrap
@@ -63,13 +75,13 @@ jobs:
           # A chave passa como argumento: é a pública derivada acima, a mesma
           # que já abriu esta sessão. O script recusa qualquer coisa que pareça
           # chave privada.
-          ssh -i ~/.ssh/id_deploy "root@${{ secrets.VPS_HOST }}" \
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "root@${{ secrets.VPS_HOST }}" \
             "bash -s -- '$(cat ~/.ssh/id_deploy.pub)'" < avexa/infra/bootstrap.sh
 
       - name: Estado dos contêineres
         if: inputs.acao == 'estado'
         run: |
-          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
           set -e
           cd /opt/avexa-motor/app 2>/dev/null || { echo "Avexa ainda não foi instalado nesta máquina."; exit 0; }
           docker compose --env-file .env -f infra/docker-compose.prod.yml ps
@@ -84,7 +96,7 @@ jobs:
       - name: Como o nginx existente é montado
         if: inputs.acao == 'nginx'
         run: |
-          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
           # Sem set -e: aqui é inspeção. Um ls que falha é informação, não motivo
           # para abortar e perder o resto do retrato.
           proxy=$(docker ps --format '{{.Names}}' | grep -Ei 'nginx|caddy|traefik' | head -1)
@@ -120,5 +132,5 @@ jobs:
       - name: Logs
         if: inputs.acao == 'logs'
         run: |
-          ssh -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml logs --tail 200 '${{ inputs.servico }}'"
