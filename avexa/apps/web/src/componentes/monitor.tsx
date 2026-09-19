@@ -197,6 +197,7 @@ export function BarrasBloqueio({ dados }: { dados: ResumoMonitor['bloqueios'] })
     canal_desligado: 'Canal não contratado',
     template_nao_aprovado: 'Template não aprovado',
     sem_destinatario: 'Lead sem endereço no canal',
+    sem_link_agendamento: 'Texto pedia link de agenda e não havia',
     fora_da_janela: 'Fora da janela de contato',
     intervalo_minimo: 'Intervalo mínimo entre contatos',
   }

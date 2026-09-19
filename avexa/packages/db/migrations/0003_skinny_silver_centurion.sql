@@ -1,0 +1,1 @@
+ALTER TABLE "cliente" ADD COLUMN "provedor_agenda" "provedor_agenda";

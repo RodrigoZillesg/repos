@@ -104,3 +104,9 @@ jobs:
       # integração e o rodízio pulando quem está ocupado.
       - name: Integração Google
         run: pnpm --filter @avexa/worker e2e:google
+
+      # Contra um Calendly falso. É o caminho que o Google não tem: o fornecedor
+      # não marca, devolve link, e a reunião só passa a existir quando o webhook
+      # assinado avisa que o lead escolheu o horário.
+      - name: Integração Calendly
+        run: pnpm --filter @avexa/worker e2e:calendly

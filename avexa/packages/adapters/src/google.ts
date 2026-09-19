@@ -1,4 +1,12 @@
-import type { Intervalo } from '@avexa/core'
+import {
+  escolherConsultor,
+  horariosLivres,
+  type AdaptadorAgenda,
+  type Intervalo,
+  type LimitesMotor,
+  type PedidoReuniao,
+  type ResultadoReuniao,
+} from '@avexa/core'
 import { requisitar, type Buscar } from './http.ts'
 
 /** Google Workspace: OAuth, Calendar e Sheets.
@@ -298,5 +306,100 @@ export function configGoogleDoAmbiente(
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     redirectUri:
       env.GOOGLE_REDIRECT_URI ?? 'https://app.avexa.global/api/integracoes/google/retorno',
+  }
+}
+
+/* --------------------------- Adaptador de agenda --------------------------- */
+
+export interface ContextoAgendaGoogle {
+  accessToken: string
+  /** Agendas do time, na ordem do rodízio. */
+  calendarios: readonly string[]
+  rodizio: boolean
+  limites: LimitesMotor
+  buscar?: Buscar
+}
+
+/** Google Calendar atrás da interface de agenda.
+ *
+ *  Marca direto porque temos escrita na agenda do time: escolhemos o horário,
+ *  criamos o compromisso e convidamos o lead. */
+export function adaptadorGoogleAgenda(ctx: ContextoAgendaGoogle): AdaptadorAgenda {
+  return {
+    provedor: 'google_calendar',
+    marcaDireto: true,
+
+    async ocupados(de, ate) {
+      const r = await ocupados(ctx.accessToken, ctx.calendarios, de, ate, ctx.buscar)
+      return r.ok ? r.calendarios : null
+    },
+
+    async oferecer(p: PedidoReuniao): Promise<ResultadoReuniao> {
+      if (ctx.calendarios.length === 0) {
+        return { tipo: 'falhou', erro: 'nenhuma agenda escolhida para este cliente' }
+      }
+
+      // Duas semanas de horizonte: oferecer daqui a um mês não ajuda ninguém.
+      const ate = new Date(p.de.getTime() + 14 * 86_400_000)
+      const resposta = await ocupados(ctx.accessToken, ctx.calendarios, p.de, ate, ctx.buscar)
+      if (!resposta.ok) return { tipo: 'falhou', erro: resposta.erro }
+
+      const livres = resposta.calendarios
+      const disponiveis = Object.keys(livres)
+      if (disponiveis.length === 0) {
+        return { tipo: 'falhou', erro: 'nenhuma das agendas configuradas está acessível' }
+      }
+
+      // Sem rodízio, um horário só serve se a agenda única estiver livre. Com
+      // rodízio, a varredura ignora os ocupados e a colisão é conferida por
+      // consultor — senão um horário em que só um dos três está ocupado seria
+      // descartado para todos.
+      const horarios = horariosLivres({
+        de: p.de,
+        ate,
+        duracaoMin: p.duracaoMin,
+        ocupados: ctx.rodizio ? [] : Object.values(livres).flat(),
+        fuso: p.fusoDoLead,
+        limites: ctx.limites,
+        quantos: 10,
+        folgaMin: 10,
+      })
+
+      for (const inicio of horarios) {
+        const fim = new Date(inicio.getTime() + p.duracaoMin * 60_000)
+        const responsavel = ctx.rodizio
+          ? escolherConsultor(disponiveis, livres, inicio, fim)
+          : (disponiveis[0] ?? null)
+        if (!responsavel) continue
+
+        const evento = await criarEvento(
+          ctx.accessToken,
+          {
+            calendarId: responsavel,
+            titulo: p.titulo,
+            ...(p.descricao ? { descricao: p.descricao } : {}),
+            inicio,
+            fim,
+            fuso: p.fusoDoLead,
+            convidados: [p.emailDoLead],
+            ...(p.lembreteMin !== undefined ? { lembreteMin: p.lembreteMin } : {}),
+            comMeet: true,
+          },
+          ctx.buscar,
+        )
+        if ('erro' in evento) return { tipo: 'falhou', erro: evento.erro }
+
+        return {
+          tipo: 'marcado',
+          inicio,
+          fim,
+          responsavel,
+          ...(evento.link ? { link: evento.link } : {}),
+          ...(evento.meet ? { conferencia: evento.meet } : {}),
+        }
+      }
+
+      return { tipo: 'falhou', erro: 'nenhum horário livre nas próximas duas semanas' }
+    },
   }
 }

@@ -15,6 +15,20 @@
       "when": 1789811515060,
       "tag": "0001_quiet_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789816887570,
+      "tag": "0002_lively_master_mold",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789816998008,
+      "tag": "0003_skinny_silver_centurion",
+      "breakpoints": true
     }
   ]
 }

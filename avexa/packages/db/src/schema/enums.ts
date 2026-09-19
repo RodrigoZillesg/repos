@@ -63,8 +63,20 @@ export const integracaoTipoEnum = pgEnum('integracao_tipo', [
   'hubspot',
   'google_calendar',
   'google_sheets',
+  'calendly',
   'webhook',
   'email_time',
+])
+
+/** Ferramenta de agenda do cliente. O produto não impõe calendário: quem agenda
+ *  é a ferramenta que o cliente já usa. */
+export const provedorAgendaEnum = pgEnum('provedor_agenda', ['google_calendar', 'calendly'])
+
+export const reuniaoStatusEnum = pgEnum('reuniao_status', [
+  /** Link entregue ao lead; ele ainda não escolheu horário. */
+  'oferecida',
+  'marcada',
+  'cancelada',
 ])
 
 export const numeroStatusEnum = pgEnum('numero_status', ['livre', 'reservado', 'atribuido', 'inativo'])

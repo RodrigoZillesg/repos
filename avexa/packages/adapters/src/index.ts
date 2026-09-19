@@ -7,6 +7,7 @@ import { adaptadorWhatsApp, type ConfigWhatsApp } from './whatsapp.ts'
 
 export * from './http.ts'
 export * from './google.ts'
+export * from './calendly.ts'
 export * from './resend.ts'
 export * from './twilio.ts'
 export * from './vapi.ts'

@@ -8,7 +8,14 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { canalEnum, eventoTipoEnum, execucaoEstadoEnum, tentativaEstadoEnum } from './enums.ts'
+import {
+  canalEnum,
+  eventoTipoEnum,
+  execucaoEstadoEnum,
+  provedorAgendaEnum,
+  reuniaoStatusEnum,
+  tentativaEstadoEnum,
+} from './enums.ts'
 import { cliente } from './tenancy.ts'
 import { fluxo, fluxoVersao } from './fluxo.ts'
 import { lead, pessoa } from './lead.ts'
@@ -175,4 +182,45 @@ export const mensagem = pgTable(
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('mensagem_pessoa_idx').on(t.pessoaId, t.canal, t.criadoEm)],
+)
+
+/** Reunião oferecida ou marcada para um lead.
+ *
+ *  Existe porque os dois modelos de agenda terminam em lugares diferentes no
+ *  tempo: com marcação direta a reunião nasce pronta; com link, nasce apenas
+ *  oferecida e vira `marcada` quando o webhook do fornecedor avisa que o lead
+ *  escolheu. Sem esta tabela não haveria onde pousar essa confirmação, e o
+ *  painel não saberia dizer se a reunião existe. */
+export const reuniao = pgTable(
+  'reuniao',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    leadId: uuid()
+      .notNull()
+      .references(() => lead.id, { onDelete: 'cascade' }),
+    clienteId: uuid()
+      .notNull()
+      .references(() => cliente.id, { onDelete: 'cascade' }),
+    execucaoId: uuid().references(() => execucao.id, { onDelete: 'set null' }),
+    provedor: provedorAgendaEnum().notNull(),
+    status: reuniaoStatusEnum().notNull().default('oferecida'),
+    /** Id do compromisso no fornecedor, para casar o cancelamento depois. */
+    externoId: text(),
+    /** Agenda ou consultor que ficou com a reunião. */
+    responsavel: text(),
+    inicio: timestamp({ withTimezone: true }),
+    fim: timestamp({ withTimezone: true }),
+    /** Link entregue ao lead, quando quem marca é ele. */
+    linkAgendamento: text(),
+    linkEvento: text(),
+    conferencia: text(),
+    motivoCancelamento: text(),
+    criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    confirmadaEm: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    index('reuniao_lead_idx').on(t.leadId),
+    index('reuniao_cliente_idx').on(t.clienteId, t.inicio),
+    index('reuniao_externo_idx').on(t.provedor, t.externoId),
+  ],
 )

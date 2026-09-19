@@ -40,6 +40,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
     pnpm --filter @avexa/worker e2e:optout
     pnpm --filter @avexa/worker e2e:ativacao
     pnpm --filter @avexa/worker e2e:google
+    pnpm --filter @avexa/worker e2e:calendly
 
 ## Entrar no painel em desenvolvimento
 
@@ -51,6 +52,7 @@ Sem Resend configurado, o link mágico não sai por e-mail. Este comando gera um
 
     POST|GET  /api/hooks/v1/<cliente>/<fluxo>   entrada de lead
     POST      /api/webhooks/<canal>             retorno do fornecedor
+    POST      /api/webhooks/agenda/calendly     reunião marcada ou cancelada
 
 A entrada de lead aceita JSON, form-urlencoded e query string, e responde 200
 com o motivo quando recusa (duplicado, lead velho, sem identificador). Um 4xx
@@ -81,6 +83,37 @@ uma das cinco personas de lead. Nada sai: o simulador não conhece adaptador
 nenhum. O painel mostra junto o resultado da validação, separando o que impede
 de publicar do que é só aviso.
 
+## Agenda: a ferramenta do cliente
+
+O nó "Agendar reunião" não conhece calendário nenhum. Ele pede uma reunião e um
+**adaptador de agenda** resolve, na ferramenta que o cliente já usa. Hoje há dois,
+e eles se comportam de formas diferentes de propósito:
+
+| | Google Calendar | Calendly |
+| --- | --- | --- |
+| Como agenda | marca direto num horário livre | entrega um link e o lead escolhe |
+| Quando a reunião existe | na hora | quando o webhook confirma |
+| Estado inicial no banco | `marcada` | `oferecida` |
+| Rodízio entre consultores | sim, por `freeBusy` | quem cuida é o Calendly |
+
+O Calendly **não** permite marcar na agenda de outra pessoa pela API, e isso é
+decisão de produto deles, não limitação a contornar: quem escolhe o horário é
+sempre o convidado. Então o adaptador cria um link de **uso único** (um link
+reutilizável circulando por aí deixaria qualquer pessoa marcar na agenda do
+cliente), o fluxo entrega esse link pelo canal seguinte como `{{link_agendamento}}`,
+e a reunião só passa a existir quando `invitee.created` chega assinado. Um texto
+que pede o link e não o tem **não sai** — o lead receberia uma frase cortada; a
+tentativa fica registrada com motivo `sem_link_agendamento` e o lead segue para
+o time, que agenda por fora.
+
+Com as duas ferramentas conectadas, quem decide é a preferência do cliente; sem
+preferência, o Calendly ganha, porque conectá-lo é um gesto mais deliberado do que
+ter o Google ligado para planilha. Se a preferida estiver revogada, o motor cai na
+outra em vez de parar.
+
+Acrescentar Cal.com ou Microsoft Bookings é escrever mais um adaptador: nenhum
+fluxo de cliente precisa mudar.
+
 ## Google Workspace
 
 Cada cliente conecta a própria conta pela aba Integrações. A Avexa não é dona da
@@ -88,9 +121,9 @@ agenda nem da planilha de ninguém: guardamos só o refresh token, **cifrado em
 repouso** com `APP_SECRET` (AES-256-GCM, amarrado ao cliente e ao tipo — um
 segredo movido de um cliente para outro no banco não decifra).
 
-- **Calendar** dá vida ao nó "Agendar reunião": consulta os horários ocupados,
-  oferece um livre dentro da janela de contato do lead, faz o rodízio entre
-  consultores e cria o evento com o lead convidado e link do Meet.
+- **Calendar** consulta os horários ocupados, oferece um livre dentro da janela de
+  contato do lead, faz o rodízio entre consultores e cria o evento com o lead
+  convidado e link do Meet.
 - **Sheets** dá vida ao destino "Planilha compartilhada".
 
 Escopos mínimos: `calendar.events` e `calendar.readonly` (nunca o `/auth/calendar`
@@ -102,6 +135,24 @@ reunião em cima de compromisso existente.
 
 Acesso revogado pelo cliente desliga a integração e pede reconexão, em vez de
 tentar renovar a cada lead.
+
+## Calendly
+
+Mesma aba Integrações, mesmo cofre de segredo. Duas diferenças que importam na
+operação:
+
+- O operador escolhe **qual tipo de evento** o fluxo oferece (uma conversa de 30
+  min não é uma aula demonstrativa de 60). Sem essa escolha o nó de agenda falha
+  dizendo o que fazer, em vez de devolver erro de fornecedor.
+- O webhook de confirmação só é aceito com `CALENDLY_SIGNING_KEY`: sem chave a
+  rota recusa tudo (`503`), porque um webhook aberto deixaria qualquer um inventar
+  reunião no painel do cliente. A assinatura é conferida sobre o corpo **cru** —
+  reserializar o JSON muda espaço e ordem de chave e a assinatura deixa de bater —
+  com janela de tolerância contra replay.
+
+Reunião marcada pelo link público do cliente, fora de um fluxo nosso, não casa com
+lead nenhum. Isso não é erro: a rota responde `200` (senão o Calendly reenviaria
+para sempre) e diz que não casou.
 
 ## Monitor
 

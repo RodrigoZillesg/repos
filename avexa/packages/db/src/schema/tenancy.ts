@@ -8,7 +8,14 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { canalEnum, clienteStatusEnum, idiomaEnum, numeroStatusEnum, papelEnum } from './enums.ts'
+import {
+  canalEnum,
+  clienteStatusEnum,
+  idiomaEnum,
+  numeroStatusEnum,
+  papelEnum,
+  provedorAgendaEnum,
+} from './enums.ts'
 
 /** Cliente atendido pela Platty. É o tenant: quase tudo pendura aqui.
  *  A exceção deliberada é `supressao`, que é global por pessoa. */
@@ -28,6 +35,9 @@ export const cliente = pgTable(
     pais: text().notNull().default('AU'),
     idiomaPadrao: idiomaEnum().notNull().default('en'),
     status: clienteStatusEnum().notNull().default('ativando'),
+    /** Ferramenta de agenda preferida quando o cliente conectou mais de uma.
+     *  Nulo deixa a escolha para o serviço. */
+    provedorAgenda: provedorAgendaEnum(),
     /** Executa fluxos por inteiro e registra tudo, sem disparar nada de verdade.
      *  Permite rodar em espelho antes da virada. */
     dryRun: boolean().notNull().default(true),

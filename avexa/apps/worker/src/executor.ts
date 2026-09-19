@@ -26,9 +26,9 @@ import {
 } from '@avexa/db'
 import {
   agendarAvanco,
-  agendarReuniao,
   carregarFatosContato,
   carregarLimites,
+  oferecerReuniao,
 } from '@avexa/servicos'
 import { qualificar } from '@avexa/ia'
 import type { Ambiente } from './contexto.ts'
@@ -270,9 +270,42 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
     ...(p.lead.campos as Record<string, unknown>),
     nome: p.lead.nome ?? '',
     cliente: p.clienteNome,
+    // Disponível para o texto usar como {{link_agendamento}} quando o fluxo
+    // passou por uma etapa de agenda que devolveu link.
+    link_agendamento: (p.contexto.linkAgendamento as string | undefined) ?? '',
   }
-  const corpo = modelo ? renderizar(modelo.corpo, valores) : { texto: '', faltando: [] }
+  let corpo = modelo ? renderizar(modelo.corpo, valores) : { texto: '', faltando: [] }
+
+  // "Incluir link de agendamento" no nó de SMS: acrescenta o link só quando ele
+  // existe e o texto ainda não o traz, para não mandar o endereço duas vezes.
+  const link = p.contexto.linkAgendamento as string | undefined
+  if (p.etapa.cfg.link === 'Sim' && link && !corpo.texto.includes(link)) {
+    corpo = { ...corpo, texto: `${corpo.texto} ${link}`.trim() }
+  }
   const assunto = modelo?.assunto ? renderizar(modelo.assunto, valores).texto : undefined
+
+  // Um texto que pede o link e sai sem ele chega ao lead como frase cortada
+  // ("marque aqui:" e nada). Melhor não mandar e deixar o motivo visível no
+  // monitor: o lead ainda vai ser entregue ao time, que agenda por fora.
+  if (corpo.faltando.includes('link_agendamento')) {
+    await db.insert(tTentativa).values({
+      execucaoId: p.execucaoId,
+      leadId: p.lead.id,
+      clienteId: p.clienteId,
+      fluxoId: p.fluxoId,
+      pessoaId: p.lead.pessoaId,
+      etapaId: p.etapa.id,
+      canal: p.canal,
+      destinatario: fatos.destinatario ?? '',
+      estado: 'cancelada',
+      motivo: 'sem_link_agendamento',
+      ...(modelo ? { templateId: modelo.id } : {}),
+      conteudo: { assunto: assunto ?? null, texto: corpo.texto, faltando: corpo.faltando },
+      dryRun: p.seco,
+      agendadaPara: p.agora,
+    })
+    return { acao: 'pular' }
+  }
 
   const [nova] = await db
     .insert(tTentativa)
@@ -429,8 +462,8 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       return
 
     case 'agendar': {
-      // Sem e-mail não há como convidar ninguém. O fluxo segue: o lead ainda
-      // será entregue ao time, que agenda por fora.
+      // Sem e-mail não há como convidar nem identificar quem marcou pelo link.
+      // O fluxo segue: o lead ainda será entregue ao time, que agenda por fora.
       if (!p.lead.email) {
         p.contexto.agendamento = { ok: false, motivo: 'lead sem e-mail' }
         return
@@ -440,30 +473,44 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       const lembrete =
         p.etapa.cfg.lembrete === '1 hora' ? 60 : p.etapa.cfg.lembrete === '24 horas' ? 1440 : undefined
 
-      const r = await agendarReuniao(amb.db, {
+      const r = await oferecerReuniao(amb.db, {
         clienteId: p.clienteId,
+        leadId: p.lead.id,
+        execucaoId: p.execucaoId,
         titulo: `${p.clienteNome} · conversa com ${p.lead.nome ?? 'lead'}`,
         descricao: p.lead.resumo ?? '',
         duracaoMin: duracao,
         ...(lembrete !== undefined ? { lembreteMin: lembrete } : {}),
         emailDoLead: p.lead.email,
+        ...(p.lead.nome ? { nomeDoLead: p.lead.nome } : {}),
         fusoDoLead: p.lead.fusoHorario ?? 'Australia/Sydney',
         limites: p.limites,
+        de: amb.agora(),
         rodizio: p.etapa.cfg.agenda === 'Rodízio entre consultores',
-        agora: amb.agora(),
       })
 
-      if (r.ok) {
+      if (r.tipo === 'marcado') {
         p.contexto.agendamento = {
           ok: true,
+          modo: 'marcado',
           inicio: r.inicio.toISOString(),
-          consultor: r.consultor,
-          ...(r.meet ? { meet: r.meet } : {}),
+          responsavel: r.responsavel,
+          ...(r.conferencia ? { conferencia: r.conferencia } : {}),
         }
         p.contexto.qualificado = true
         await amb.db
           .update(tLead)
           .set({ etiquetas: [...(p.lead.etiquetas ?? []), 'reuniao-agendada'] })
+          .where(eq(tLead.id, p.lead.id))
+      } else if (r.tipo === 'link') {
+        // Quem escolhe o horário é o lead. O link entra no contexto para que a
+        // próxima etapa de canal o entregue — e a reunião só existe quando o
+        // webhook do fornecedor avisar que ele marcou.
+        p.contexto.linkAgendamento = r.url
+        p.contexto.agendamento = { ok: true, modo: 'link', url: r.url }
+        await amb.db
+          .update(tLead)
+          .set({ etiquetas: [...(p.lead.etiquetas ?? []), 'link-agendamento-enviado'] })
           .where(eq(tLead.id, p.lead.id))
       } else {
         // Não fingimos que agendou. O motivo fica no contexto e o fluxo segue

@@ -8,12 +8,14 @@
 import { eq } from 'drizzle-orm'
 import { cliente, db, integracao } from '@avexa/db'
 import {
-  agendarReuniao,
-  concluirConexao,
-  conexaoValida,
+  concluirConexaoGoogle,
+  conexaoGoogle,
   definirDestino,
   encerrarFila,
+  ingerirLead,
+  oferecerReuniao,
   registrarNaPlanilha,
+  reunioesDoLead,
 } from '@avexa/servicos'
 import { LIMITES_PADRAO } from '@avexa/core'
 
@@ -81,7 +83,7 @@ if (!c) {
 const problemas: string[] = []
 
 // 1. Consentimento concluído.
-const conexao = await concluirConexao(d, c.id, 'google_calendar', 'codigo-do-google')
+const conexao = await concluirConexaoGoogle(d, c.id, 'google_calendar', 'codigo-do-google')
 console.log(`1. conexão: ${conexao.ok ? 'ok' : conexao.erro}`)
 if (!conexao.ok) problemas.push('a conexão falhou')
 
@@ -107,41 +109,70 @@ await definirDestino(d, c.id, 'google_calendar', {
   accessToken: 'ya29.velho',
   expiraEm: new Date(Date.now() - 60_000).toISOString(),
 })
-const renovada = await conexaoValida(d, c.id, 'google_calendar')
+const renovada = await conexaoGoogle(d, c.id, 'google_calendar')
 console.log(`3. renovação: ${'erro' in renovada ? renovada.erro : renovada.accessToken}`)
 if ('erro' in renovada || renovada.accessToken !== 'ya29.renovado') {
   problemas.push('a renovação não devolveu o token novo')
 }
 
-// 4. Agendamento: rodízio, pulando quem está ocupado e quem não compartilhou.
-const r = await agendarReuniao(d, {
+// 4. Agendamento pelo adaptador de agenda: rodízio, pulando quem está ocupado e
+//    quem não compartilhou. Google marca direto, então a reunião já nasce
+//    `marcada` — é a diferença de comportamento em relação ao Calendly.
+const entrada = await ingerirLead(
+  d,
+  {
+    clienteSlug: 'ihte',
+    fluxoSlug: 'lead-novo',
+    dados: { 'Full Name': 'Lead do Google', 'E-mail': 'lead.google@exemplo.com', Phone: '+61400111222' },
+  },
+  new Date('2026-03-10T22:00:00Z'),
+)
+if (!entrada.aceito) {
+  console.error('lead recusado:', entrada.motivo)
+  process.exit(1)
+}
+
+const r = await oferecerReuniao(d, {
   clienteId: c.id,
+  leadId: entrada.leadId,
+  execucaoId: entrada.execucaoId,
   titulo: 'Conversa sobre o curso',
   duracaoMin: 30,
   lembreteMin: 60,
-  emailDoLead: 'lead@exemplo.com',
+  emailDoLead: 'lead.google@exemplo.com',
   fusoDoLead: 'Australia/Sydney',
   limites: LIMITES_PADRAO,
   rodizio: true,
   de: new Date('2026-03-10T22:00:00Z'), // 09:00 de quarta em Sydney
-  agora: new Date('2026-03-10T22:00:00Z'),
 })
 
-if (r.ok) {
-  console.log(`4. agendado com ${r.consultor} em ${r.inicio.toISOString()} · meet: ${r.meet}`)
-  if (r.consultor !== 'bruno@cliente.com') {
-    problemas.push(`esperava bruno (ana ocupada, carla não compartilhou), veio ${r.consultor}`)
+if (r.tipo === 'marcado') {
+  console.log(`4. agendado com ${r.responsavel} em ${r.inicio.toISOString()} · meet: ${r.conferencia}`)
+  if (r.responsavel !== 'bruno@cliente.com') {
+    problemas.push(`esperava bruno (ana ocupada, carla não compartilhou), veio ${r.responsavel}`)
   }
-  const corpo = eventoCriado as { attendees?: Array<{ email: string }>; reminders?: { overrides?: unknown[] } }
-  if (corpo?.attendees?.[0]?.email !== 'lead@exemplo.com') problemas.push('o lead não foi convidado')
-  if (!corpo?.reminders?.overrides?.length) problemas.push('o lembrete não foi configurado')
+  const corpo = (eventoCriado ?? {}) as {
+    attendees?: Array<{ email: string }>
+    reminders?: { overrides?: unknown[] }
+  }
+  if (corpo.attendees?.[0]?.email !== 'lead.google@exemplo.com') {
+    problemas.push('o lead não foi convidado')
+  }
+  if (!corpo.reminders?.overrides?.length) problemas.push('o lembrete não foi configurado')
+
+  const [registro] = await reunioesDoLead(d, entrada.leadId)
+  console.log(`   registro: ${registro?.provedor} · ${registro?.status}`)
+  if (registro?.status !== 'marcada') {
+    problemas.push('marcação direta deveria nascer como reunião marcada')
+  }
+  if (registro?.provedor !== 'google_calendar') problemas.push('provedor errado no registro')
 } else {
-  console.log(`4. agendamento falhou: ${r.erro}`)
+  console.log(`4. agendamento não marcou: ${r.tipo === 'falhou' ? r.erro : 'veio link'}`)
   problemas.push('o agendamento falhou')
 }
 
 // 5. Planilha.
-await concluirConexao(d, c.id, 'google_sheets', 'codigo')
+await concluirConexaoGoogle(d, c.id, 'google_sheets', 'codigo')
 await definirDestino(d, c.id, 'google_sheets', { planilhaId: 'plan-1', aba: 'Leads' })
 const planilha = await registrarNaPlanilha(d, c.id, ['2026-03-10', 'Ana', '+61...', 'a@b.com', 82])
 console.log(`5. planilha: ${planilha.ok ? `linha escrita (${(linhaPlanilha ?? []).length} colunas)` : planilha.erro}`)
@@ -152,7 +183,7 @@ revogado = true
 await definirDestino(d, c.id, 'google_calendar', {
   expiraEm: new Date(Date.now() - 60_000).toISOString(),
 })
-const depois = await conexaoValida(d, c.id, 'google_calendar')
+const depois = await conexaoGoogle(d, c.id, 'google_calendar')
 console.log(`6. revogado: ${'erro' in depois ? depois.erro : 'ainda conectado'}`)
 if (!('erro' in depois) || !depois.precisaReconectar) {
   problemas.push('acesso revogado não pediu reconexão')

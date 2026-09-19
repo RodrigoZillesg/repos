@@ -11,7 +11,8 @@
     "e2e:optout": "tsx scripts/e2e-optout.ts",
     "e2e:ativacao": "tsx scripts/e2e-ativacao.ts",
     "demo": "tsx scripts/demo.ts",
-    "e2e:google": "tsx scripts/e2e-google.ts"
+    "e2e:google": "tsx scripts/e2e-google.ts",
+    "e2e:calendly": "tsx scripts/e2e-calendly.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

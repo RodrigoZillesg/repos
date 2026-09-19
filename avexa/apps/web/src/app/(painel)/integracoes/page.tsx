@@ -2,22 +2,29 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db, integracao } from '@avexa/db'
-import { googleConfigurado } from '@avexa/servicos'
+import { calendlyConfigurado, googleConfigurado } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
 import { clientePadrao, listarClientes } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
-import { IntegracaoGoogle, type EstadoIntegracao } from '@/componentes/integracao-google'
-import { desligar, salvarAgendas, salvarPlanilha } from './acoes'
+import { Integracoes, type EstadoCliente } from '@/componentes/integracoes'
+import {
+  buscarTiposDeEvento,
+  desligar,
+  escolherProvedorAgenda,
+  salvarAgendas,
+  salvarPlanilha,
+  salvarTipoDeEvento,
+} from './acoes'
 
 export const dynamic = 'force-dynamic'
 
 const MENSAGEM: Record<string, string> = {
   'sem-permissao': 'Só o administrador conecta contas de cliente.',
   'pedido-invalido': 'Pedido inválido.',
-  'google-nao-configurado': 'Este ambiente não tem as credenciais do Google.',
-  'state-invalido': 'O retorno do Google não conferiu. Comece de novo.',
-  'sem-codigo': 'O Google não devolveu um código de autorização.',
-  access_denied: 'O consentimento foi recusado na tela do Google.',
+  'fornecedor-nao-configurado': 'Este ambiente não tem as credenciais desse fornecedor.',
+  'state-invalido': 'O retorno do fornecedor não conferiu. Comece de novo.',
+  'sem-codigo': 'O fornecedor não devolveu um código de autorização.',
+  access_denied: 'O consentimento foi recusado na tela do fornecedor.',
 }
 
 export default async function PaginaIntegracoes({
@@ -37,29 +44,42 @@ export default async function PaginaIntegracoes({
   const d = db()
   const linhas = await d.select().from(integracao).where(eq(integracao.clienteId, cli.id))
 
-  const estado = (tipo: EstadoIntegracao['tipo']): EstadoIntegracao => {
+  const cfg = (tipo: string): Record<string, unknown> => {
     const linha = linhas.find((l) => l.tipo === tipo && l.ativo)
-    const cfg = (linha?.config ?? {}) as Record<string, unknown>
-    return {
-      clienteId: cli.id,
-      tipo,
-      conectada: Boolean(linha),
-      conta: typeof cfg.conta === 'string' ? cfg.conta : undefined,
-      calendarios: Array.isArray(cfg.calendarios) ? (cfg.calendarios as string[]) : undefined,
-      planilhaId: typeof cfg.planilhaId === 'string' ? cfg.planilhaId : undefined,
-      aba: typeof cfg.aba === 'string' ? cfg.aba : undefined,
-    }
+    return linha ? ((linha.config ?? {}) as Record<string, unknown>) : {}
   }
+  const conectada = (tipo: string) => linhas.some((l) => l.tipo === tipo && l.ativo)
 
-  const configurado = googleConfigurado()
+  const estado: EstadoCliente = {
+    clienteId: cli.id,
+    provedorEscolhido: (cli.provedorAgenda as EstadoCliente['provedorEscolhido']) ?? null,
+    googleConfigurado: googleConfigurado(),
+    calendlyConfigurado: calendlyConfigurado(),
+    calendar: {
+      conectada: conectada('google_calendar'),
+      calendarios: (cfg('google_calendar').calendarios as string[] | undefined) ?? [],
+      rodizio: cfg('google_calendar').rodizio !== false,
+    },
+    calendly: {
+      conectada: conectada('calendly'),
+      tipoDeEvento: (cfg('calendly').tipoDeEvento as string | undefined) ?? null,
+      tipoDeEventoNome: (cfg('calendly').tipoDeEventoNome as string | undefined) ?? null,
+      tipoDeEventoDuracao: (cfg('calendly').tipoDeEventoDuracao as number | undefined) ?? null,
+    },
+    sheets: {
+      conectada: conectada('google_sheets'),
+      planilhaId: (cfg('google_sheets').planilhaId as string | undefined) ?? null,
+      aba: (cfg('google_sheets').aba as string | undefined) ?? null,
+    },
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6 lg:p-8">
       <h1 className="text-xl font-semibold">Integrações</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-tinta-2)]">
-        Cada cliente conecta a própria conta Google. A Avexa não é dona da agenda nem da planilha de
-        ninguém: guardamos apenas a autorização, cifrada, e o cliente pode revogá-la a qualquer
-        momento pela própria conta.
+        O agendamento acontece na ferramenta que o cliente já usa. A Avexa não é dona da agenda nem
+        da planilha de ninguém: guardamos apenas a autorização, cifrada, e o cliente pode revogá-la
+        a qualquer momento pela própria conta.
       </p>
 
       {clientes.length > 1 && (
@@ -96,22 +116,16 @@ export default async function PaginaIntegracoes({
         </Cartao>
       )}
 
-      <div className="mt-5 space-y-4">
-        <IntegracaoGoogle
-          estado={estado('google_calendar')}
+      <div className="mt-5">
+        <Integracoes
+          estado={estado}
           podeAdministrar={s.permissoes.administrar}
-          googleConfigurado={configurado}
           aoDesligar={desligar}
           aoSalvarAgendas={salvarAgendas}
           aoSalvarPlanilha={salvarPlanilha}
-        />
-        <IntegracaoGoogle
-          estado={estado('google_sheets')}
-          podeAdministrar={s.permissoes.administrar}
-          googleConfigurado={configurado}
-          aoDesligar={desligar}
-          aoSalvarAgendas={salvarAgendas}
-          aoSalvarPlanilha={salvarPlanilha}
+          aoSalvarTipoDeEvento={salvarTipoDeEvento}
+          aoBuscarTipos={buscarTiposDeEvento}
+          aoEscolherProvedor={escolherProvedorAgenda}
         />
       </div>
     </div>

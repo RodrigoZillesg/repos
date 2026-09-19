@@ -70,3 +70,4 @@ export type MotivoBloqueio =
   | 'canal_desligado'
   | 'template_nao_aprovado'
   | 'sem_destinatario'
+  | 'sem_link_agendamento'

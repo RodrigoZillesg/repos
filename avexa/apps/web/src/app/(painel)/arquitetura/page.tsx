@@ -19,15 +19,27 @@ const CAMADAS = [
     nota: 'Cada tentativa de contato é um registro: para quem, de qual cliente, em qual fluxo, por qual canal, em que passo, com que resultado.',
   },
   {
-    nome: 'Adaptadores',
+    nome: 'Adaptadores de canal',
     sub: 'mesma interface: enviar, receber, status',
     itens: ['Ligação', 'WhatsApp', 'SMS', 'E-mail', 'Telegram (em breve)'],
     nota: 'Acrescentar Telegram, RCS ou Instagram Direct é escrever um adaptador novo. Nenhum fluxo de cliente precisa ser alterado.',
   },
   {
+    nome: 'Adaptadores de agenda',
+    sub: 'o motor pede uma reunião; o adaptador resolve como',
+    itens: ['Google Calendar', 'Calendly', 'Cal.com (em breve)'],
+    nota: 'O Avexa não impõe calendário: agenda-se na ferramenta que o cliente já usa. O Google marca direto num horário livre; o Calendly entrega um link de uso único e a reunião só passa a existir quando o webhook avisa que o lead escolheu o horário.',
+  },
+  {
     nome: 'Fornecedores',
     sub: 'trocáveis peça por peça',
-    itens: ['Voz: Vapi sobre Twilio', 'WhatsApp: Cloud API oficial', 'SMS: Twilio', 'E-mail: Resend'],
+    itens: [
+      'Voz: Vapi sobre Twilio',
+      'WhatsApp: Cloud API oficial',
+      'SMS: Twilio',
+      'E-mail: Resend',
+      'Agenda: conta do próprio cliente',
+    ],
   },
 ] as const
 
@@ -38,6 +50,7 @@ const COMPARTILHADO = [
   ['Ligação', 'Pool de números e a camada de IA', 'Número dedicado, roteiro e base de conhecimento'],
   ['Fluxos', 'Modelos de partida e os nós disponíveis', 'Quantos fluxos quiser, cada um com sua URL de entrada'],
   ['Supressão', 'Lista única por pessoa, válida em todo canal e todo cliente', 'Nada: ninguém tem lista própria'],
+  ['Agenda', 'Nada: a conexão é da conta do cliente, autorizada por ele', 'Google Calendar ou Calendly, com as agendas ou o tipo de evento que ele escolher'],
 ] as const
 
 const REGRAS = [
@@ -47,6 +60,7 @@ const REGRAS = [
   ['Só em horário útil', 'Fuso do lead. Fora da janela, a tentativa espera a manhã seguinte.'],
   ['Teto de tentativas', 'O fluxo pode pedir menos que o teto do sistema, nunca mais.'],
   ['Subfluxo não vira laço', 'Um fluxo pode chamar outro, mas o motor corta a cadeia se ela voltar ao ponto de partida.'],
+  ['Reunião só com horário confirmado', 'Enquanto o lead não escolher o horário, existe uma oferta, não uma reunião. E um texto que pede o link de agenda não sai sem ele.'],
 ] as const
 
 export default async function PaginaArquitetura() {
@@ -61,8 +75,9 @@ export default async function PaginaArquitetura() {
       <h1 className="text-xl font-semibold">Como o sistema se sustenta</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-tinta-2)]">
         O motor de fluxo não sabe o que é Resend nem o que é WhatsApp. Ele emite uma intenção de
-        contato e um adaptador traduz. É isso que permite trocar de fornecedor sem reescrever produto
-        e acrescentar Telegram sem tocar em nenhum fluxo existente.
+        contato e um adaptador traduz. Vale igual para a agenda: o motor pede uma reunião e quem
+        resolve é a ferramenta que o cliente já usa. É isso que permite trocar de fornecedor sem
+        reescrever produto e acrescentar Telegram ou Cal.com sem tocar em nenhum fluxo existente.
       </p>
 
       <div className="mt-7 space-y-2">
