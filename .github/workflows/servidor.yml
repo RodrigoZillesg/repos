@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, equipe, trocar-email, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -23,9 +23,13 @@ on:
         type: string
         default: worker
       email:
-        description: 'Para a ação "acesso": de quem é o link'
+        description: 'E-mail alvo (acesso, testar-email, trocar-email: o NOVO)'
         type: string
-        default: rodrigo@platty.tech
+        default: rodrigo.zillesg@platty.tech
+      email_atual:
+        description: 'Para a ação "trocar-email": o endereço que está no banco hoje'
+        type: string
+        default: ''
 
 concurrency:
   group: servidor
@@ -354,6 +358,34 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker e2e:email '${{ inputs.email }}'"
+
+      # Quem está na equipe. O e-mail é a chave de entrada no painel, então
+      # errar o endereço tranca a pessoa do lado de fora.
+      - name: Equipe
+        if: inputs.acao == 'equipe'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker equipe listar"
+
+      # Corrige o e-mail de alguém da equipe. `email_atual` é o que está no
+      # banco; `email` é o certo.
+      - name: Trocar o e-mail de um usuário
+        if: inputs.acao == 'trocar-email'
+        run: |
+          if [ -z "${{ inputs.email_atual }}" ]; then
+            echo "::error::preencha 'email_atual' com o endereço que está no banco hoje"
+            exit 1
+          fi
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker equipe email \
+             '${{ inputs.email_atual }}' '${{ inputs.email }}'"
+
+          echo "== equipe depois da troca =="
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker equipe listar"
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver
       # configurado, é assim que se entra: o link não tem como sair por e-mail.

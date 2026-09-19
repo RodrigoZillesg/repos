@@ -211,7 +211,7 @@ Primeiro acesso ao painel, sem Resend configurado:
 # O script roda no worker: é a única imagem do deploy com dependências
 # instaladas. A emissão do token é a mesma que o painel usa.
 compose run --rm worker pnpm --filter @avexa/worker acesso \
-  rodrigo@platty.tech https://new.avexa.global
+  rodrigo.zillesg@platty.tech https://new.avexa.global
 ```
 
 O link vale 15 minutos e funciona uma vez só.

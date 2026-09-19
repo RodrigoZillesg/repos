@@ -38,7 +38,7 @@ const CLIENTES: EntradaAtivacao[] = [
 ]
 
 const EQUIPE = [
-  { nome: 'Rodrigo', email: 'rodrigo@platty.tech', papel: 'admin' },
+  { nome: 'Rodrigo', email: 'rodrigo.zillesg@platty.tech', papel: 'admin' },
   { nome: 'Enzo', email: 'enzo@platty.tech', papel: 'operacao' },
   { nome: 'Paulo', email: 'paulo@platty.tech', papel: 'designer' },
   { nome: 'Sebastian', email: 'sebastian@platty.tech', papel: 'copy' },

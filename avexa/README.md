@@ -48,7 +48,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
 
 Sem Resend configurado, o link mágico não sai por e-mail. Este comando gera um:
 
-    pnpm --filter @avexa/web acesso rodrigo@platty.tech
+    pnpm --filter @avexa/web acesso rodrigo.zillesg@platty.tech
 
 ## Rotas públicas
 

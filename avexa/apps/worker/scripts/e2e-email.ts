@@ -4,7 +4,7 @@
  *  com domínio não verificado passa em qualquer checagem de presença e falha
  *  no envio — é justamente esse caso que este script pega.
  *
- *      pnpm --filter @avexa/worker e2e:email rodrigo@platty.tech
+ *      pnpm --filter @avexa/worker e2e:email rodrigo.zillesg@platty.tech
  */
 import { adaptadorResend, adaptadoresDoAmbiente } from '@avexa/adapters'
 

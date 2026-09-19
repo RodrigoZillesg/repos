@@ -4,7 +4,7 @@
  *  dependências instaladas para rodar um script solto. Aqui é só conveniência
  *  para quem já está com o painel aberto:
  *
- *      pnpm --filter @avexa/web acesso rodrigo@platty.tech
+ *      pnpm --filter @avexa/web acesso rodrigo.zillesg@platty.tech
  */
 import { emitirLinkDeAcesso } from '@avexa/servicos'
 

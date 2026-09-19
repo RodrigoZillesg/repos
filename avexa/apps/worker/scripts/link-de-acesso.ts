@@ -5,7 +5,7 @@
  *  para executar um script solto. Enquanto o Resend não estiver configurado
  *  em produção, este é o único jeito de entrar.
  *
- *      pnpm --filter @avexa/worker acesso rodrigo@platty.tech https://new.avexa.global
+ *      pnpm --filter @avexa/worker acesso rodrigo.zillesg@platty.tech https://new.avexa.global
  */
 import { emitirLinkDeAcesso } from '@avexa/servicos'
 
