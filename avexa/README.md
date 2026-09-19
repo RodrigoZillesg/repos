@@ -266,6 +266,20 @@ Escopos pedidos: contatos (leitura e escrita), esquema de contatos e reuniões.
 Nunca um escopo amplo de CRM, que seria acesso à base comercial inteira do
 cliente.
 
+## Produção
+
+Uma máquina no VPS, quatro contêineres: Postgres, painel, worker e Caddy. Só o
+Caddy fala com a internet — o banco não publica porta, e o painel também não.
+
+O deploy sai do GitHub Actions (`.github/workflows/deploy.yml`), manual, com
+typecheck e testes rodando antes de qualquer coisa tocar o servidor. O passo
+final só termina quando `https://app.avexa.global/entrar` responde 200; se não
+responder, o job despeja os logs do `web` e do `caddy` e falha.
+
+O passo a passo — chave de deploy, `infra/bootstrap.sh`, secrets, DNS — está em
+[`infra/README.md`](infra/README.md), junto com o que este arranjo **não** tem
+(réplica, staging, backup automático).
+
 ## Monitor
 
 A aba Monitor responde as perguntas que este produto esconde quando falha: está

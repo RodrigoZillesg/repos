@@ -1,0 +1,49 @@
+# TLS automático pelo Let's Encrypt. O Caddy é o único que fala com a internet:
+# web e postgres não publicam porta nenhuma no host.
+{
+	email {$ACME_EMAIL}
+}
+
+# Painel da Platty e dos clientes.
+app.avexa.global {
+	encode zstd gzip
+
+	# Cabeçalhos que o Next não põe sozinho.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy web:3000
+}
+
+# Entrada de lead. O domínio é separado de propósito: a URL fica curta o
+# suficiente para o cliente colar no formulário dele sem errar, e um dia esse
+# tráfego pode ir para outro lugar sem ninguém ter que reconfigurar formulário.
+#
+# `handle_path` tira o /v1 e o rewrite recoloca no caminho real da rota, então
+# https://hooks.avexa.global/v1/ihte/lead-novo chega em
+# /api/hooks/v1/ihte/lead-novo — que é a URL que o provisionamento entrega ao
+# cliente.
+hooks.avexa.global {
+	encode zstd gzip
+
+	handle_path /v1/* {
+		rewrite * /api/hooks/v1{uri}
+		reverse_proxy web:3000
+	}
+
+	# Retorno de fornecedor (Twilio, Meta, Vapi, Calendly) também entra por aqui.
+	handle /api/webhooks/* {
+		reverse_proxy web:3000
+	}
+
+	# Qualquer outra coisa neste domínio não existe. Nada de servir o painel
+	# inteiro num host feito para receber POST de formulário.
+	handle {
+		respond "not found" 404
+	}
+}

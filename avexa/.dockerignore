@@ -1,0 +1,13 @@
+# O que nunca deve entrar no contexto de build: node_modules do host tem
+# binário compilado para a máquina errada, e .git só engorda o envio.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.git
+.env
+.env.*
+!.env.example
+*.log
