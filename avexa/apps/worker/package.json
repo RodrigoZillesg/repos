@@ -14,7 +14,8 @@
     "e2e:google": "tsx scripts/e2e-google.ts",
     "e2e:calendly": "tsx scripts/e2e-calendly.ts",
     "e2e:entrega": "tsx scripts/e2e-entrega.ts",
-    "e2e:retencao": "tsx scripts/e2e-retencao.ts"
+    "e2e:retencao": "tsx scripts/e2e-retencao.ts",
+    "acesso": "tsx scripts/link-de-acesso.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

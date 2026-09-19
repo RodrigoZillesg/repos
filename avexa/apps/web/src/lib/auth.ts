@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { and, eq, gt, isNull } from 'drizzle-orm'
 import { db, sessao, tokenAcesso, usuario } from '@avexa/db'
 import { adaptadorResend, adaptadoresDoAmbiente } from '@avexa/adapters'
+import { VALIDADE_LINK_MIN, emitirLinkDeAcesso } from '@avexa/servicos'
 import { PERMISSOES, type Papel, type Permissoes } from './papeis'
 
 /** Acesso por link mágico.
@@ -15,7 +16,6 @@ import { PERMISSOES, type Papel, type Permissoes } from './papeis'
  *  dump do banco não dá acesso a ninguém. */
 
 const COOKIE = 'avexa_sessao'
-const VALIDADE_LINK_MIN = 15
 const VALIDADE_SESSAO_DIAS = 30
 
 const hash = (v: string) => createHash('sha256').update(v).digest('hex')
@@ -35,18 +35,10 @@ export interface Sessao {
  *  Devolve sucesso mesmo para e-mail desconhecido: dizer "esse e-mail não
  *  existe" entrega ao mundo quem tem acesso ao painel. */
 export async function pedirLink(email: string, baseUrl: string): Promise<void> {
-  const d = db()
-  const limpo = email.trim().toLowerCase()
+  const emitido = await emitirLinkDeAcesso(email, baseUrl)
+  if (!emitido) return
 
-  const [u] = await d.select().from(usuario).where(eq(usuario.email, limpo)).limit(1)
-  if (!u || !u.ativo) return
-
-  const bruto = randomBytes(32).toString('base64url')
-  const expiraEm = new Date(Date.now() + VALIDADE_LINK_MIN * 60_000)
-
-  await d.insert(tokenAcesso).values({ usuarioId: u.id, tokenHash: hash(bruto), expiraEm })
-
-  const link = `${baseUrl}/entrar/confirmar?t=${bruto}`
+  const { link, usuarioId, email: limpo, nome, idioma } = emitido
   const cfg = adaptadoresDoAmbiente().email
 
   if (!cfg) {
@@ -57,14 +49,14 @@ export async function pedirLink(email: string, baseUrl: string): Promise<void> {
   }
 
   await adaptadorResend(cfg).enviar({
-    tentativaId: `login-${u.id}`,
+    tentativaId: `login-${usuarioId}`,
     canal: 'email',
     destinatario: limpo,
-    assunto: u.idioma === 'en' ? 'Your Avexa sign-in link' : 'Seu link de acesso ao Avexa',
+    assunto: idioma === 'en' ? 'Your Avexa sign-in link' : 'Seu link de acesso ao Avexa',
     texto:
-      u.idioma === 'en'
-        ? `Hi ${u.nome},\n\nOpen this link to sign in. It expires in ${VALIDADE_LINK_MIN} minutes and works once.\n\n${link}`
-        : `Oi ${u.nome},\n\nAbra este link para entrar. Ele expira em ${VALIDADE_LINK_MIN} minutos e funciona uma vez só.\n\n${link}`,
+      idioma === 'en'
+        ? `Hi ${nome},\n\nOpen this link to sign in. It expires in ${VALIDADE_LINK_MIN} minutes and works once.\n\n${link}`
+        : `Oi ${nome},\n\nAbra este link para entrar. Ele expira em ${VALIDADE_LINK_MIN} minutos e funciona uma vez só.\n\n${link}`,
   })
 }
 

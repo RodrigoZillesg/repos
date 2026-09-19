@@ -208,9 +208,9 @@ compose restart worker          # depois de mexer no .env
 Primeiro acesso ao painel, sem Resend configurado:
 
 ```sh
-# O tsx vem da raiz: a imagem do worker não instala as dependências de apps/web.
-compose run --rm -w /app/apps/web worker \
-  /app/node_modules/.bin/tsx scripts/link-de-acesso.ts \
+# O script roda no worker: é a única imagem do deploy com dependências
+# instaladas. A emissão do token é a mesma que o painel usa.
+compose run --rm worker pnpm --filter @avexa/worker acesso \
   rodrigo@platty.tech https://new.avexa.global
 ```
 

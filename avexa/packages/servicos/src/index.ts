@@ -1,4 +1,5 @@
 export * from './cripto.ts'
+export * from './acesso.ts'
 export * from './limites.ts'
 export * from './supressao.ts'
 export * from './fatos.ts'

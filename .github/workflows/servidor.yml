@@ -207,13 +207,13 @@ jobs:
       - name: Link de acesso
         if: inputs.acao == 'acesso'
         run: |
-          # O tsx vem da raiz do workspace, não de apps/web: a imagem do worker
-          # instala as dependências só dos pacotes que ele usa, e apps/web não
-          # é um deles. `pnpm --filter @avexa/web` procuraria o tsx lá dentro e
-          # não acharia.
+          # O script roda no worker, não no painel: a imagem do worker é a única
+          # do deploy com dependências instaladas, e o pnpm liga os pacotes do
+          # workspace dentro de apps/worker/node_modules — de apps/web nada
+          # resolveria. A emissão em si é a mesma do painel (@avexa/servicos).
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
-             run --rm -w /app/apps/web worker /app/node_modules/.bin/tsx scripts/link-de-acesso.ts \
+             run --rm worker pnpm --filter @avexa/worker acesso \
              '${{ inputs.email }}' https://new.avexa.global"
 
       # A verificação de fumaça do deploy entra um lead de verdade pelo webhook
