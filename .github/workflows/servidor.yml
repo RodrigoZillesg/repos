@@ -307,6 +307,11 @@ jobs:
           VAPI_ASSISTANT_ID: ${{ secrets.VAPI_ASSISTANT_ID }}
           VAPI_PHONE_NUMBER_ID: ${{ secrets.VAPI_PHONE_NUMBER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Não é segredo, mas mora no mesmo .env e precisa de um caminho para
+          # ser corrigido: o Google aposenta nome de modelo, e um nome velho
+          # gravado no servidor vence o padrão do código. O secret só existe
+          # para trocar isso sem um deploy.
+          IA_MODELO: ${{ secrets.IA_MODELO || 'gemini-3.6-flash' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           CALENDLY_CLIENT_ID: ${{ secrets.CALENDLY_CLIENT_ID }}
@@ -326,7 +331,7 @@ jobs:
                        WHATSAPP_TOKEN WHATSAPP_PHONE_NUMBER_ID \
                        TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_REMETENTE \
                        VAPI_API_KEY VAPI_ASSISTANT_ID VAPI_PHONE_NUMBER_ID \
-                       GEMINI_API_KEY \
+                       GEMINI_API_KEY IA_MODELO \
                        GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
                        CALENDLY_CLIENT_ID CALENDLY_CLIENT_SECRET CALENDLY_SIGNING_KEY \
                        HUBSPOT_CLIENT_ID HUBSPOT_CLIENT_SECRET; do

@@ -27,7 +27,7 @@ export interface ConfigGemini {
 }
 
 export function modeloGemini(cfg: ConfigGemini): ModeloIA {
-  const modelo = cfg.modelo ?? 'gemini-2.5-flash'
+  const modelo = cfg.modelo ?? 'gemini-3.6-flash'
 
   return {
     provedor: 'google',
