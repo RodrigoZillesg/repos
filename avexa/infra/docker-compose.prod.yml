@@ -20,6 +20,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: avexa
     volumes: ['dados-pg:/var/lib/postgresql/data']
+    networks: [interna]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U avexa']
       interval: 5s
@@ -35,9 +36,16 @@ services:
       NODE_ENV: production
       PORT: '3000'
       HOSTNAME: '0.0.0.0'
-    # Loopback, não 0.0.0.0: invisível da internet, e ainda assim alcançável
-    # pelo proxy que já existe na máquina e pela verificação do deploy.
+    # Loopback para a verificação do deploy a partir do host. Invisível da
+    # internet.
     ports: ['127.0.0.1:${PORTA_WEB:-3001}:3000']
+    networks:
+      # A nossa rede, onde ficam banco e worker.
+      interna:
+      # E a do proxy que já existe na máquina, para ele falar com este contêiner
+      # pelo nome. De dentro do contêiner do nginx, 127.0.0.1 é o próprio nginx
+      # — apontar o proxy para a porta de loopback do host não funcionaria.
+      nginx_public:
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
@@ -48,9 +56,19 @@ services:
     environment:
       DATABASE_URL: postgres://avexa:${POSTGRES_PASSWORD}@postgres:5432/avexa
       NODE_ENV: production
+    networks: [interna]
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
+
+networks:
+  interna:
+  # Criada pelo projeto avexa-nginx, que já roda nesta máquina. `external`
+  # significa: uso, não crio e não mexo. Se ela sumir, o nosso deploy falha em
+  # vez de subir uma rede nova com o mesmo nome e confundir o proxy.
+  nginx_public:
+    external: true
+    name: nginx_public
 
 volumes:
   dados-pg:
