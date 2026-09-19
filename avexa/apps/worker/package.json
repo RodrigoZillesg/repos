@@ -18,7 +18,8 @@
     "acesso": "tsx scripts/link-de-acesso.ts",
     "fornecedores": "tsx scripts/fornecedores.ts",
     "equipe": "tsx scripts/equipe.ts",
-    "e2e:email": "tsx scripts/e2e-email.ts"
+    "e2e:email": "tsx scripts/e2e-email.ts",
+    "e2e:ia": "tsx scripts/e2e-ia.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",
