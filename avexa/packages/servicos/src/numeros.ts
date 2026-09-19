@@ -4,9 +4,9 @@ import {
   apontarWebhookSms,
   buscarNumerosDisponiveis,
   comprarNumero,
-  type BuscaDeNumeros,
   type CredenciaisTwilio,
   type NumeroDisponivel,
+  type TipoDeNumero,
 } from '@avexa/adapters'
 
 /** Números de telefone: comprar, guardar e atribuir a cliente.
@@ -39,6 +39,11 @@ export type ResultadoProvisionar =
   | { ok: true; e164: string; sid: string; atribuido: boolean }
   | { ok: false; erro: string }
 
+/** Ordem de procura. Local primeiro porque é o mais barato e o mais comum;
+ *  Mobile logo atrás porque na Austrália é ele que manda SMS, e procurar só
+ *  em Local faria a compra falhar dizendo que não há número no país. */
+const TIPOS: TipoDeNumero[] = ['Local', 'Mobile', 'TollFree']
+
 export interface PedidoDeNumero {
   pais: string
   contem?: string
@@ -57,19 +62,33 @@ export async function provisionarNumero(
   p: PedidoDeNumero,
   webhook?: string | null,
 ): Promise<ResultadoProvisionar> {
-  const busca: BuscaDeNumeros = {
-    pais: p.pais,
-    exigeVoz: true,
-    limite: 5,
-    ...(p.contem ? { contem: p.contem } : {}),
+  let escolhido: NumeroDisponivel | null = null
+  let ultimoErro = ''
+
+  for (const tipo of TIPOS) {
+    const r = await buscarNumerosDisponiveis(cred, {
+      pais: p.pais,
+      tipo,
+      exigeVoz: true,
+      limite: 5,
+      ...(p.contem ? { contem: p.contem } : {}),
+    })
+    if (!r.ok) {
+      ultimoErro = r.erro
+      continue
+    }
+    escolhido = escolher(r.numeros)
+    if (escolhido) break
   }
 
-  const disponiveis = await buscarNumerosDisponiveis(cred, busca)
-  if (!disponiveis.ok) return { ok: false, erro: disponiveis.erro }
-
-  const escolhido = escolher(disponiveis.numeros)
   if (!escolhido) {
-    return { ok: false, erro: `nenhum número com voz e SMS disponível em ${p.pais}` }
+    return {
+      ok: false,
+      erro:
+        `nenhum número com voz e SMS disponível em ${p.pais.toUpperCase()}` +
+        (ultimoErro ? ` (${ultimoErro})` : '') +
+        '. Confira o cadastro regulatório e o endereço da conta no console do Twilio.',
+    }
   }
 
   const compra = await comprarNumero(cred, {

@@ -11,7 +11,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { cliente, db, numero } from '@avexa/db'
-import { buscarNumerosDisponiveis } from '@avexa/adapters'
+import { buscarNumerosDisponiveis, type TipoDeNumero } from '@avexa/adapters'
 import {
   credenciaisDoAmbiente,
   provisionarNumero,
@@ -51,18 +51,40 @@ if (comando === 'procurar') {
     process.exit(1)
   }
 
-  const r = await buscarNumerosDisponiveis(cred, { pais, exigeVoz: true, limite: 10 })
-  if (!r.ok) {
-    console.error(`falhou: ${r.erro}`)
-    process.exit(1)
+  // Procura nos três tipos. Na Austrália, número Local em geral não manda
+  // SMS — quem manda é Mobile —, e procurar só em Local devolve lista vazia
+  // que parece "não há número no país" em vez de "procurei no lugar errado".
+  const TIPOS: TipoDeNumero[] = ['Local', 'Mobile', 'TollFree']
+  let achou = 0
+
+  for (const tipo of TIPOS) {
+    const r = await buscarNumerosDisponiveis(cred, { pais, tipo, exigeVoz: true, limite: 5 })
+    if (!r.ok) {
+      console.log(`${tipo.padEnd(8)} erro: ${r.erro}`)
+      continue
+    }
+    if (r.numeros.length === 0) {
+      console.log(`${tipo.padEnd(8)} nenhum com voz + SMS`)
+      continue
+    }
+    console.log(`${tipo}:`)
+    for (const n of r.numeros) {
+      console.log(`  ${n.e164}  ${n.locality ?? n.regiao ?? ''}  ${n.capacidades.join('+')}`)
+      achou++
+    }
   }
-  if (r.numeros.length === 0) {
-    console.log(`nenhum número com voz e SMS disponível em ${pais.toUpperCase()}`)
+
+  if (achou === 0) {
+    console.log(
+      `\nnada com voz + SMS em ${pais.toUpperCase()}. As causas comuns são, nesta ordem:\n` +
+        '  1. falta o cadastro regulatório (Regulatory Bundle) do país na conta Twilio;\n' +
+        '  2. falta endereço verificado (Address) exigido pelo país;\n' +
+        '  3. a conta ainda é trial, e trial não compra número.\n' +
+        'O console do Twilio em Phone Numbers > Regulatory Compliance diz qual é o caso.',
+    )
     process.exit(0)
   }
-  for (const n of r.numeros) {
-    console.log(`${n.e164}  ${n.locality ?? n.regiao ?? ''}  ${n.capacidades.join('+')}`)
-  }
+
   console.log('\nnada foi comprado. use `numeros comprar` para adquirir um.')
   process.exit(0)
 }

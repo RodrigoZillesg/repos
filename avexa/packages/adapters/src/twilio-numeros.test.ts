@@ -109,3 +109,17 @@ test('reapontar o webhook usa o SID e manda só o que muda', async () => {
   assert.equal(corpo.get('SmsUrl'), 'https://new.avexa.global/api/webhooks/sms')
   assert.equal(corpo.get('PhoneNumber'), null)
 })
+
+test('o tipo do número entra na URL: Local não manda SMS na Austrália', async () => {
+  // Procurar só em Local devolve vazio na AU e parece "não há número no
+  // país", quando na verdade se procurou no recurso errado.
+  const f = falso({ available_phone_numbers: [] })
+  await buscarNumerosDisponiveis({ ...CRED, buscar: f.buscar }, { pais: 'AU', tipo: 'Mobile' })
+  assert.match(f.chamadas[0]!.url, /AvailablePhoneNumbers\/AU\/Mobile\.json/)
+})
+
+test('sem tipo, procura em Local', async () => {
+  const f = falso({ available_phone_numbers: [] })
+  await buscarNumerosDisponiveis({ ...CRED, buscar: f.buscar }, { pais: 'US' })
+  assert.match(f.chamadas[0]!.url, /AvailablePhoneNumbers\/US\/Local\.json/)
+})

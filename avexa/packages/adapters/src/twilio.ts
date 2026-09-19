@@ -181,9 +181,18 @@ const capacidadesDe = (v: unknown): string[] => {
   return [c.voice ? 'voz' : '', c.SMS || c.sms ? 'sms' : ''].filter(Boolean)
 }
 
+/** Tipos de número do Twilio.
+ *
+ *  Não é detalhe: na Austrália, número `Local` em geral NÃO manda SMS — quem
+ *  manda é `Mobile`. Buscar só em Local devolve lista vazia e parece que não
+ *  há número no país, quando na verdade se procurou no lugar errado. */
+export type TipoDeNumero = 'Local' | 'Mobile' | 'TollFree'
+
 export interface BuscaDeNumeros {
   /** ISO de dois caracteres: AU, US. */
   pais: string
+  /** Padrão: Local. */
+  tipo?: TipoDeNumero
   /** Exige voz além de SMS. Um número que só manda SMS não serve para o motor
    *  de voz, e descobrir isso na hora de ligar é tarde. */
   exigeVoz?: boolean
@@ -205,7 +214,7 @@ export async function buscarNumerosDisponiveis(
   })
 
   const r = await requisitar(
-    `${base(cred)}/AvailablePhoneNumbers/${b.pais.toUpperCase()}/Local.json?${q}`,
+    `${base(cred)}/AvailablePhoneNumbers/${b.pais.toUpperCase()}/${b.tipo ?? 'Local'}.json?${q}`,
     {
       metodo: 'GET',
       cabecalhos: autorizacao(cred),
