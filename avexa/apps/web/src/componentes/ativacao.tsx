@@ -31,9 +31,11 @@ interface Props {
   podeAtivar: boolean
   t: Record<Chave, string>
   aoAtivar: (e: FormAtivacao) => Promise<ResultadoAtivacao>
+  /** Números já nossos e sem dono, para reaproveitar em vez de comprar. */
+  numerosLivres: Array<{ e164: string; capacidades: string[] }>
 }
 
-export function Ativacao({ podeAtivar, t, aoAtivar }: Props) {
+export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
   const [form, setForm] = useState<FormAtivacao>({
     nome: '',
     slug: '',
@@ -43,6 +45,10 @@ export function Ativacao({ podeAtivar, t, aoAtivar }: Props) {
     emailDoTime: '',
     canais: { ligacao: true, whatsapp: true, sms: true, email: true },
     fluxosExtras: '',
+    // Pool primeiro: reaproveitar não custa nada, e comprar custa todo mês.
+    numeroModo: 'pool',
+    numeroE164: numerosLivres[0]?.e164 ?? '',
+    numeroPais: '',
   })
   const [resultado, setResultado] = useState<ResultadoAtivacao | null>(null)
   const [pendente, iniciar] = useTransition()
@@ -149,6 +155,88 @@ export function Ativacao({ podeAtivar, t, aoAtivar }: Props) {
           ))}
         </div>
       </div>
+
+      {(form.canais.ligacao || form.canais.sms) && (
+        <div className="mt-4">
+          <Rotulo>Número de telefone do cliente</Rotulo>
+          <div className="grid gap-1.5">
+            {[
+              {
+                k: 'pool' as const,
+                nome: 'Usar um número que já temos',
+                nota: numerosLivres.length
+                  ? `${numerosLivres.length} livre${numerosLivres.length > 1 ? 's' : ''}`
+                  : 'nenhum livre',
+                desabilitado: numerosLivres.length === 0,
+              },
+              {
+                k: 'existente' as const,
+                nome: 'Escolher qual número usar',
+                nota: 'da lista de livres',
+                desabilitado: numerosLivres.length === 0,
+              },
+              {
+                k: 'comprar' as const,
+                nome: 'Comprar um número novo no Twilio',
+                nota: 'passa a custar todo mês',
+                desabilitado: false,
+              },
+            ].map((o) => (
+              <label
+                key={o.k}
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-[13px] ${
+                  o.desabilitado ? 'opacity-50' : 'cursor-pointer'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="numero-modo"
+                  checked={form.numeroModo === o.k}
+                  disabled={o.desabilitado}
+                  onChange={() => campo('numeroModo', o.k)}
+                  className="h-4 w-4 accent-[var(--color-acento)]"
+                />
+                <span className="flex-1">{o.nome}</span>
+                <span className="text-xs text-[var(--color-tinta-3)]">{o.nota}</span>
+              </label>
+            ))}
+          </div>
+
+          {form.numeroModo === 'existente' && (
+            <Selecao
+              className="mt-2"
+              value={form.numeroE164}
+              onChange={(e) => campo('numeroE164', e.target.value)}
+            >
+              {numerosLivres.map((n) => (
+                <option key={n.e164} value={n.e164}>
+                  {n.e164} · {n.capacidades.join(' + ')}
+                </option>
+              ))}
+            </Selecao>
+          )}
+
+          {form.numeroModo === 'comprar' && (
+            <div className="mt-2">
+              <Entrada
+                id="a-numero-pais"
+                value={form.numeroPais}
+                onChange={(e) => campo('numeroPais', e.target.value)}
+                placeholder="AU"
+              />
+              <Ajuda>
+                País do número, em duas letras. Em branco, usa o país do fuso do cliente. Ligar de
+                outro país derruba a taxa de resposta.
+              </Ajuda>
+            </div>
+          )}
+
+          <Ajuda>
+            O mesmo número faz a ligação e manda o SMS — o lead precisa reconhecer quem o procurou.
+            WhatsApp e e-mail saem sempre da Avexa.
+          </Ajuda>
+        </div>
+      )}
 
       <div className="mt-3">
         <Rotulo htmlFor="a-fluxos">Fluxos além do padrão</Rotulo>

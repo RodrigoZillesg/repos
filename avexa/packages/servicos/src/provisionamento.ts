@@ -19,7 +19,9 @@ import {
   type Grafo,
   type Pais,
 } from '@avexa/core'
+import type { CredenciaisTwilio } from '@avexa/adapters'
 import { MODELOS_AVEXA, ROTEIROS_AVEXA } from './modelos.ts'
+import { definirRemetente, provisionarNumero } from './numeros.ts'
 
 /** Ativação de um cliente: os nove passos do painel, em código.
  *
@@ -27,6 +29,28 @@ import { MODELOS_AVEXA, ROTEIROS_AVEXA } from './modelos.ts'
  *  opt-in) e por isso não aparece aqui. A função é idempotente pelo slug: rodar
  *  de novo para um slug que já existe falha em vez de duplicar, porque metade de
  *  uma ativação é pior que nenhuma. */
+
+/** De onde sai o número de telefone deste cliente.
+ *
+ *  Ligação e SMS usam o número próprio do cliente; WhatsApp e e-mail saem
+ *  sempre da Avexa. Por isso a escolha existe uma vez só, e vale para os dois
+ *  canais de telefonia: o lead tem que ver o mesmo número ligando e mandando
+ *  mensagem. */
+export type EscolhaDeNumero =
+  /** Pega um número livre do pool. Instantâneo, e não gasta nada novo. */
+  | { modo: 'pool' }
+  /** Um número específico que já é nosso, escolhido à mão. */
+  | { modo: 'existente'; e164: string }
+  /** Compra um número novo no Twilio. Passa a custar todo mês. */
+  | { modo: 'comprar'; pais?: string }
+
+export interface OpcoesAtivacao {
+  /** Padrão: pool. Comprar exige credenciais do Twilio. */
+  numero?: EscolhaDeNumero
+  twilio?: CredenciaisTwilio
+  /** Para onde o Twilio manda resposta e opt-out do número comprado. */
+  webhookSms?: string | null
+}
 
 export interface EntradaAtivacao {
   nome: string
@@ -65,6 +89,9 @@ export interface ResultadoAtivacao {
 }
 
 const BASE_HOOK = process.env.HOOKS_BASE_URL ?? 'https://hooks.avexa.global/v1'
+
+const avisoDePais = (e164: string, pais: string) =>
+  `O número ${e164} não é de ${pais}. Ligar e mandar SMS de outro país derruba a taxa de resposta — troque antes de virar a chave.`
 
 const eid = () => randomUUID().slice(0, 8)
 const etapa = (tipo: string, cfg: Record<string, string>, extra: Record<string, unknown> = {}) =>
@@ -149,6 +176,7 @@ export function fluxoPadrao(clienteSlug: string, canais: Record<string, boolean>
 export async function ativarCliente(
   db: Db,
   entrada: EntradaAtivacao,
+  opcoes: OpcoesAtivacao = {},
 ): Promise<ResultadoAtivacao> {
   const passos: Passo[] = []
   const urls: ResultadoAtivacao['urls'] = []
@@ -201,8 +229,62 @@ export async function ativarCliente(
     'entrou no roteamento dos números da Avexa, sem cadastro novo',
   )
 
-  // 3. Reservar o número de voz, se voz foi contratada.
-  if (entrada.canais.ligacao) {
+  // 3. O número de telefone do cliente.
+  //
+  // Vale para ligação E SMS: o lead tem que ver o mesmo número nos dois, e
+  // receber mensagem de um número e ligação de outro parece golpe. Antes isto
+  // só rodava quando voz era contratada, e gravava só no canal de ligação —
+  // cliente só de SMS ficava sem número, e quem tinha voz tinha o número
+  // gravado onde o envio de SMS não olhava.
+  const querTelefone = !!(entrada.canais.ligacao || entrada.canais.sms)
+  const escolha = opcoes.numero ?? { modo: 'pool' as const }
+
+  if (!querTelefone) {
+    marcar(3, 'Número do cliente', 'pulado', 'nem voz nem SMS contratados')
+  } else if (escolha.modo === 'comprar') {
+    if (!opcoes.twilio) {
+      marcar(3, 'Número do cliente', 'falhou', 'comprar exige credenciais do Twilio')
+      avisos.push('Sem credenciais do Twilio não dá para comprar número: ligação e SMS não saem.')
+    } else {
+      const r = await provisionarNumero(
+        db,
+        opcoes.twilio,
+        { pais: escolha.pais ?? paisCliente, clienteId, apelido: `Avexa · ${entrada.nome}` },
+        opcoes.webhookSms ?? null,
+      )
+      if (r.ok) {
+        marcar(3, 'Número do cliente', 'feito', `${r.e164} · comprado agora e já atribuído`)
+      } else {
+        marcar(3, 'Número do cliente', 'falhou', r.erro)
+        avisos.push(`A compra do número falhou (${r.erro}). Ligação e SMS não saem até resolver.`)
+      }
+    }
+  } else if (escolha.modo === 'existente') {
+    const [alvo] = await db.select().from(numero).where(eq(numero.e164, escolha.e164)).limit(1)
+    if (!alvo) {
+      marcar(3, 'Número do cliente', 'falhou', `${escolha.e164} não está cadastrado`)
+      avisos.push(`O número ${escolha.e164} não existe no sistema. Ligação e SMS não saem.`)
+    } else if (alvo.clienteId && alvo.clienteId !== clienteId) {
+      // Dois clientes no mesmo número misturaria as respostas dos leads: o
+      // webhook só traz o número, não o cliente.
+      marcar(3, 'Número do cliente', 'falhou', `${escolha.e164} já é de outro cliente`)
+      avisos.push(`O número ${escolha.e164} já pertence a outro cliente e não foi reatribuído.`)
+    } else {
+      await db
+        .update(numero)
+        .set({ status: 'atribuido', clienteId })
+        .where(eq(numero.id, alvo.id))
+      await definirRemetente(db, clienteId, alvo.e164)
+      const doPais = paisDoTelefone(alvo.e164) === paisCliente
+      marcar(
+        3,
+        'Número do cliente',
+        'feito',
+        `${alvo.e164}${doPais ? '' : ` · não é de ${paisCliente}`}`,
+      )
+      if (!doPais) avisos.push(avisoDePais(alvo.e164, paisCliente))
+    }
+  } else {
     const livres = await db.select().from(numero).where(eq(numero.status, 'livre'))
     // Prefere um número do país do cliente: ligar para um lead americano de um
     // número australiano derruba a taxa de atendimento. Só cai em outro país se
@@ -214,30 +296,23 @@ export async function ativarCliente(
         .update(numero)
         .set({ status: 'atribuido', clienteId })
         .where(eq(numero.id, livre.id))
-      await db
-        .update(clienteCanal)
-        .set({ config: { numero: livre.e164 } })
-        .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, 'ligacao')))
+      await definirRemetente(db, clienteId, livre.e164)
       marcar(
         3,
-        'Reservar o número de voz',
-        doPais ? 'feito' : 'falhou',
+        'Número do cliente',
+        'feito',
         doPais
-          ? `${livre.e164} · o mesmo número manda o SMS`
-          : `${livre.e164} · nenhum número de ${paisCliente} livre no pool, a taxa de atendimento vai sofrer`,
+          ? `${livre.e164} · do pool, serve ligação e SMS`
+          : `${livre.e164} · nenhum número de ${paisCliente} livre no pool`,
       )
-      if (!doPais) {
-        avisos.push(
-          `O número de voz (${livre.e164}) não é de ${paisCliente}. Ligar de outro país derruba a taxa de atendimento — reponha o pool e troque o número antes de virar a chave.`,
-        )
-      }
+      if (!doPais) avisos.push(avisoDePais(livre.e164, paisCliente))
     } else {
       // Pool vazio não invalida a ativação: o resto funciona e alguém repõe.
-      marcar(3, 'Reservar o número de voz', 'falhou', 'nenhum número livre no pool')
-      avisos.push('Nenhum número livre no pool: ligação e SMS não saem até alguém repor.')
+      marcar(3, 'Número do cliente', 'falhou', 'nenhum número livre no pool')
+      avisos.push(
+        'Nenhum número livre no pool: ligação e SMS não saem até alguém repor ou comprar.',
+      )
     }
-  } else {
-    marcar(3, 'Reservar o número de voz', 'pulado', 'voz não contratada')
   }
 
   // 5 e 6. Templates e roteiros, com as variáveis já preenchidas.

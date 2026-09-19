@@ -2,7 +2,14 @@
 
 import { revalidatePath } from 'next/cache'
 import { db } from '@avexa/db'
-import { ativarCliente, paraSlug, type ResultadoAtivacao } from '@avexa/servicos'
+import {
+  ativarCliente,
+  credenciaisDoAmbiente,
+  paraSlug,
+  webhookDeSms,
+  type EscolhaDeNumero,
+  type ResultadoAtivacao,
+} from '@avexa/servicos'
 import type { Canal } from '@avexa/core'
 import { sessaoAtual } from '@/lib/auth'
 
@@ -15,6 +22,10 @@ export interface FormAtivacao {
   emailDoTime: string
   canais: Record<string, boolean>
   fluxosExtras: string
+  /** De onde sai o número de telefone: do pool, um já nosso, ou comprado agora. */
+  numeroModo: 'pool' | 'existente' | 'comprar'
+  numeroE164: string
+  numeroPais: string
 }
 
 export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> {
@@ -41,6 +52,29 @@ export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> 
     return { ok: false, passos: [], urls: [], avisos: [], erro: 'escolha ao menos um canal' }
   }
 
+  const escolha: EscolhaDeNumero =
+    entrada.numeroModo === 'existente'
+      ? { modo: 'existente', e164: entrada.numeroE164.trim() }
+      : entrada.numeroModo === 'comprar'
+        ? { modo: 'comprar', ...(entrada.numeroPais.trim() ? { pais: entrada.numeroPais.trim() } : {}) }
+        : { modo: 'pool' }
+
+  if (escolha.modo === 'existente' && !escolha.e164) {
+    return { ok: false, passos: [], urls: [], avisos: [], erro: 'escolha qual número usar' }
+  }
+
+  // As credenciais só saem do ambiente do servidor; nunca passam pelo navegador.
+  const twilio = credenciaisDoAmbiente()
+  if (escolha.modo === 'comprar' && !twilio) {
+    return {
+      ok: false,
+      passos: [],
+      urls: [],
+      avisos: [],
+      erro: 'comprar número exige as credenciais do Twilio configuradas no servidor',
+    }
+  }
+
   const r = await ativarCliente(db(), {
     nome: entrada.nome.trim(),
     slug: paraSlug(entrada.slug || entrada.nome),
@@ -53,6 +87,10 @@ export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> 
       .split('\n')
       .map((x) => x.trim())
       .filter(Boolean),
+  }, {
+    numero: escolha,
+    ...(twilio ? { twilio } : {}),
+    webhookSms: webhookDeSms(),
   })
 
   if (r.ok) {

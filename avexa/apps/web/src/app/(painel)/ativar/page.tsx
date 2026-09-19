@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
-import { listarClientes } from '@/lib/dados'
+import { listarClientes, numerosLivres } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 import { Ativacao } from '@/componentes/ativacao'
 import { ativar } from './acoes'
@@ -23,8 +23,8 @@ const PASSOS = [
     tag: 'auto',
   },
   {
-    n: 'Reservar o número de voz',
-    d: 'Um número do pool é atribuído ao cliente e configurado com a assistente. Voz é o único canal com número dedicado, e o mesmo número manda o SMS.',
+    n: 'Definir o número do cliente',
+    d: 'Reaproveita um número livre, usa um escolhido à mão ou compra um novo no Twilio. O mesmo número liga e manda SMS; WhatsApp e e-mail saem sempre da Avexa.',
     tag: 'auto',
   },
   {
@@ -65,7 +65,7 @@ export default async function PaginaAtivar() {
   if (!s.permissoes.verClientes) redirect('/')
 
   const t = dicionarioDe(s.idioma)
-  const clientes = await listarClientes(s)
+  const [clientes, livres] = await Promise.all([listarClientes(s), numerosLivres(s)])
 
   return (
     <div className="mx-auto w-full max-w-4xl p-6 lg:p-8">
@@ -75,7 +75,12 @@ export default async function PaginaAtivar() {
       </p>
 
       <section className="mt-7">
-        <Ativacao podeAtivar={s.permissoes.administrar} t={t} aoAtivar={ativar} />
+        <Ativacao
+          podeAtivar={s.permissoes.administrar}
+          t={t}
+          aoAtivar={ativar}
+          numerosLivres={livres}
+        />
       </section>
 
       <section className="mt-7">

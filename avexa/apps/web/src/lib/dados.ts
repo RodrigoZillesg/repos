@@ -9,6 +9,7 @@ import {
   fluxo,
   fluxoVersao,
   lead,
+  numero,
   reuniao,
   supressao,
   template,
@@ -26,6 +27,18 @@ import type { Sessao } from './auth'
 export async function listarClientes(s: Sessao) {
   if (!s.permissoes.verClientes) return []
   return db().select().from(cliente).orderBy(cliente.nome)
+}
+
+/** Números livres, para a ativação oferecer "usar um que já temos".
+ *
+ *  Só quem administra vê: número livre é recurso da operação, não do cliente. */
+export async function numerosLivres(s: Sessao) {
+  if (!s.permissoes.administrar) return []
+  return db()
+    .select({ e164: numero.e164, capacidades: numero.capacidades })
+    .from(numero)
+    .where(eq(numero.status, 'livre'))
+    .orderBy(numero.e164)
 }
 
 export async function clientePadrao(s: Sessao, slug?: string) {
