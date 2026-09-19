@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -200,6 +200,48 @@ jobs:
 
           echo "== certificados agora =="
           ls -1 /srv/avexa/nginx/certbot/conf/live/
+          REMOTO
+
+      # Instala a renovação automática do NOSSO certificado. Tudo mora em
+      # /opt/avexa-motor e no crontab do usuário de deploy: nenhum arquivo de
+      # sistema é criado, nada do outro produto é tocado, e a renovação é
+      # escopada com --cert-name para o certificado do admin.avexa.global não
+      # entrar nem por acidente. Desinstalar é apagar a linha do crontab.
+      - name: Instalar a renovação automática
+        if: inputs.acao == 'renovacao-automatica'
+        run: |
+          scp -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy \
+            avexa/infra/renovar-certificado.sh \
+            "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}:/opt/avexa-motor/renovar-certificado.sh"
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          chmod 755 /opt/avexa-motor/renovar-certificado.sh
+
+          # 17:23 é horário arbitrário de propósito: o Let's Encrypt pede que
+          # não se renove em ponto. Uma linha só, idempotente.
+          linha='23 17 * * * /opt/avexa-motor/renovar-certificado.sh >> /opt/avexa-motor/certificado.log 2>&1'
+          atual=$(crontab -l 2>/dev/null | grep -v 'renovar-certificado.sh' || true)
+          printf '%s\n%s\n' "$atual" "$linha" | sed '/^$/d' | crontab -
+
+          echo "== crontab do usuário de deploy =="
+          crontab -l
+
+          echo
+          echo "== ensaio: roda agora, sem gastar cota se ainda não vence =="
+          /opt/avexa-motor/renovar-certificado.sh
+          REMOTO
+
+      # Renova agora, à mão. O cron faz o mesmo todo dia; isto é para conferir
+      # que funciona sem esperar um dia.
+      - name: Renovar o certificado
+        if: inputs.acao == 'renovar'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTO'
+          set -euo pipefail
+          /opt/avexa-motor/renovar-certificado.sh
+          echo "== validade agora =="
+          echo | openssl s_client -connect new.avexa.global:443 -servername new.avexa.global 2>/dev/null \
+            | openssl x509 -noout -dates -subject
           REMOTO
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver

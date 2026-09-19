@@ -216,6 +216,29 @@ compose run --rm worker pnpm --filter @avexa/worker acesso \
 
 O link vale 15 minutos e funciona uma vez só.
 
+## Certificado TLS
+
+O certificado de `new.avexa.global` é do Let's Encrypt e vale 90 dias. A
+renovação automática se instala uma vez, pela ação **`renovacao-automatica`** do
+workflow *Servidor*. Ela põe dois pedaços no servidor e nada mais:
+
+- `/opt/avexa-motor/renovar-certificado.sh` — roda o certbot num contêiner
+  descartável e recarrega o nginx **apenas se** o certificado mudou e o
+  `nginx -t` passou;
+- uma linha no crontab do usuário `avexa`, rodando o script todo dia às 17h23.
+
+A renovação é escopada com `--cert-name new.avexa.global`. Isso é deliberado: os
+certificados do outro produto que mora nesta máquina ficam de fora, mesmo
+estando no mesmo diretório do certbot.
+
+Para renovar à mão, ou só conferir que o mecanismo funciona, use a ação
+**`renovar`** — ela roda o mesmo script e imprime a validade atual.
+
+> **Atenção, e isso não é nosso:** o certificado de `admin.avexa.global`, do
+> outro produto, **não tem renovação automática nenhuma** — não há contêiner de
+> certbot em pé nem entrada de cron na máquina. Ele foi emitido à mão e vai
+> vencer à mão. Quem cuida daquele produto precisa saber disso.
+
 ## Backup
 
 O que não pode ser perdido é o volume do Postgres — leads, execuções, supressão
@@ -248,6 +271,8 @@ Dito na cara, para ninguém descobrir no dia errado:
 - **Sem réplica e sem failover.** Uma máquina. Se ela cair, o Avexa cai junto —
   os leads ficam na fila do cliente, não se perdem, mas ninguém é contatado.
 - **Backup não está automatizado**, só documentado acima.
+- **O certificado do outro produto (`admin.avexa.global`) não se renova
+  sozinho.** O nosso sim, mas aquele não é nosso para consertar.
 - **Sem staging.** O deploy vai direto para produção. Os testes e os e2e do CI
   são o que separa uma mudança ruim de um lead real.
 - **A identidade do servidor é aceita a cada deploy** (`ssh-keyscan`), em vez de
