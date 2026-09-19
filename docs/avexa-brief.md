@@ -2,13 +2,16 @@
 
 > Documento vivo. Origem: entrevista estruturada de 2026-09-19 sobre o artefato de
 > simulação "Avexa — Painel de Operação". Registra decisões tomadas, não hipóteses.
+>
+> O Avexa é construído **do zero**. A automação que hoje roda em n8n/Make não será
+> migrada nem usada como referência: permanece intocada até a virada e é desligada
+> quando o Avexa entrar. O contrato do webhook, portanto, é nosso para definir.
 
 ## 1. Objetivo
 
 Orquestrar o contato multicanal com leads dos clientes da Platty — ligação com
 assistente de IA, WhatsApp, SMS e e-mail — a partir de fluxos desenhados num
-construtor visual, substituindo a automação montada à mão em n8n/Make que atende
-os clientes hoje.
+construtor visual, no lugar da automação montada à mão que atende os clientes hoje.
 
 A promessa central: pôr um cliente novo no ar sem que ele crie conta, cadastre
 cartão, configure DNS ou registre número em canal nenhum. Ele recebe **uma URL de
@@ -44,7 +47,7 @@ O acesso do cliente final é uma decisão que **diverge do artefato** (que afirm
 
 ## 4. Inputs
 
-- **Lead**, via webhook por fluxo (`https://hooks.avexa.app/v1/<cliente>/<slug>`):
+- **Lead**, via webhook por fluxo (`https://hooks.avexa.global/v1/<cliente>/<slug>`):
   POST JSON / form-urlencoded ou GET query string. Campos nomeados pelo cliente,
   mais `utm_*` capturadas automaticamente e campos personalizados livres.
   Controles no próprio nó de entrada: idade máxima do lead (15min a 72h) e política
@@ -108,10 +111,14 @@ Ninguém tem lista própria.
 | SMS + telefonia | Twilio — mesmo número para SMS e ligação, para o lead reconhecer a origem |
 | Voz com IA | Vapi, com número importado do Twilio |
 | LLM | Camada plugável, **Gemini** como default |
-| Marca | Avexa é definitiva (`hooks.avexa.app`, remetente e painel) |
+| Marca | Avexa é definitiva |
+| Domínio | `avexa.global` — painel em `app.`, webhooks em `hooks.`, remetente `@avexa.global` |
+| Local no repo | Pasta `avexa/` dentro de `RodrigoZillesg/repos` |
+| Autenticação | Link mágico por e-mail via Resend, para equipe e cliente |
 | Idioma | Painel bilíngue PT/EN desde o começo |
 | Escala alvo | 10-20 clientes, alguns milhares de leads/mês |
-| Transição | Corte seco: n8n segue intocado até a virada, os três clientes passam juntos |
+| Limites do motor | Configuração global editável pelo admin, com defaults conservadores |
+| Transição | Do zero, sem migração. Corte seco: os três clientes passam juntos na virada |
 | Entrega | Escopo completo de uma vez, sem fatiar |
 
 ### Arquitetura em 4 camadas
@@ -128,7 +135,7 @@ O motor não sabe o que é Resend nem o que é WhatsApp: emite uma intenção de
 e o adaptador traduz. Acrescentar Telegram é escrever um adaptador novo, sem tocar
 em fluxo existente.
 
-### Tipos de nó do construtor (17)
+### Tipos de etapa do construtor (16)
 
 - **Início** — Entrada de lead (fixo)
 - **Controle** — Checar permissão · Esperar · Condição · Repetir · Executar outro fluxo · Marcar lead
@@ -141,15 +148,14 @@ em fluxo existente.
 
 | # | Item | Situação |
 |---|---|---|
-| 1 | **Export dos fluxos n8n/Make** dos três clientes | **Bloqueia o motor.** São a especificação real — cadência, textos e condições já validados com leads de verdade |
-| 2 | **Payload real do webhook** do International House | **Bloqueia o nó de entrada.** Preciso dos nomes de campo como eles chegam hoje |
-| 3 | Corte seco + entrega sem fatiar concentra risco num dia só | Mitigação acordada: modo *dry-run* por cliente, para rodar em espelho contra o n8n antes da virada |
-| 4 | Região do VPS Hostinger vs. leads AU/US | A definir — afeta latência de telefonia e postura de privacidade |
-| 5 | Teto de tentativas do sistema, valor numérico | A definir |
-| 6 | Convite e autenticação do cliente final | A definir — como ele recebe acesso sem "criar conta" |
+| 1 | Corte seco + entrega sem fatiar concentra risco num dia só | Mitigação acordada: modo *dry-run* por cliente, para rodar em espelho contra o n8n antes da virada |
+| 2 | Região do VPS Hostinger vs. leads AU/US | A definir — afeta latência de telefonia e postura de privacidade |
+| 3 | Retenção de dados (lead, transcrição, áudio de chamada) | A definir — implementado como política configurável, sem expurgo automático até a decisão |
+| 4 | Contas de fornecedor (Twilio, Vapi, Meta WABA, Resend, Google Cloud) | A confirmar quais já existem; o código lê tudo de variável de ambiente |
 
 ## 11. Próxima ação
 
-1. Obter os itens 1 e 2 das pendências.
-2. Modelar o schema Postgres a partir deles — em especial `tentativa` e `supressao`.
-3. Só então escrever o motor de fluxo.
+1. Estrutura do monorepo em `avexa/`, com Docker para app, worker e Postgres.
+2. Schema Postgres e migrações — em especial `tentativa` e `supressao`.
+3. Motor de fluxo sobre fila durável, com os adaptadores por trás de uma interface única.
+4. Painel: construtor, templates, ativação e arquitetura, conforme o artefato.
