@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { CalendarCheck } from 'lucide-react'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
 import { clientePadrao, listarClientes, listarLeads, type LeadNaLista } from '@/lib/dados'
@@ -49,6 +50,16 @@ export default async function PaginaLeads({
 
   const leads = await listarLeads(s, cli.id)
   const detalhe = !s.permissoes.escopoCliente
+
+  // No fuso do cliente, não no do lead: quem lê esta tela é o time que vai
+  // entrar na reunião.
+  const horario = new Intl.DateTimeFormat(s.idioma === 'en' ? 'en-AU' : 'pt-BR', {
+    timeZone: cli.fusoHorario,
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 
   /** Nome curto do destino: a coluna é estreita e "google_sheets" não diz nada
    *  para quem lê. */
@@ -142,7 +153,44 @@ export default async function PaginaLeads({
                     </span>
                   </td>
                   <td className="p-3 text-[var(--color-tinta-2)]">
-                    {rotuloResultado(l.estado, l.motivo)}
+                    {/* A reunião vem primeiro porque é o melhor resultado que
+                        este produto pode dar. "Em andamento" ao lado de uma
+                        reunião marcada é a informação menos importante das
+                        duas. */}
+                    {l.reuniao?.status === 'marcada' && l.reuniao.inicio && (
+                      <span className="mb-1 block">
+                        <Selo tom="ok">
+                          <CalendarCheck size={11} aria-hidden className="mr-1" />
+                          {t['leads.reuniao.marcada']} {horario.format(l.reuniao.inicio)}
+                        </Selo>
+                        {l.reuniao.responsavel && (
+                          <span className="mt-0.5 block text-xs text-[var(--color-tinta-3)]">
+                            com {l.reuniao.responsavel}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {l.reuniao?.status === 'oferecida' && (
+                      <span className="mb-1 block">
+                        <Selo>{t['leads.reuniao.linkEnviado']}</Selo>
+                        <span className="mt-0.5 block text-xs text-[var(--color-tinta-3)]">
+                          {t['leads.reuniao.semHorario']}
+                        </span>
+                      </span>
+                    )}
+                    {l.reuniao?.status === 'cancelada' && (
+                      <span className="mb-1 block">
+                        <Selo tom="alerta">{t['leads.reuniao.cancelada']}</Selo>
+                        {l.reuniao.motivoCancelamento && (
+                          <span className="mt-0.5 block max-w-[16rem] text-xs leading-snug text-[var(--color-tinta-3)]">
+                            {l.reuniao.motivoCancelamento}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    <span className={l.reuniao ? 'text-xs text-[var(--color-tinta-3)]' : ''}>
+                      {rotuloResultado(l.estado, l.motivo)}
+                    </span>
                   </td>
                   <td className="p-3">
                     {l.entregas.length === 0 ? (

@@ -9,6 +9,7 @@ import {
   fluxo,
   fluxoVersao,
   lead,
+  reuniao,
   supressao,
   template,
   tentativa,
@@ -95,6 +96,15 @@ export interface EntregaDoLead {
   quando: Date
 }
 
+export interface ReuniaoDoLead {
+  status: string
+  provedor: string
+  inicio: Date | null
+  responsavel: string | null
+  motivoCancelamento: string | null
+  link: string | null
+}
+
 export interface LeadNaLista {
   id: string
   nome: string | null
@@ -109,6 +119,9 @@ export interface LeadNaLista {
   /** Onde este lead foi parar. Vazio enquanto o fluxo não chegou à etapa de
    *  saída — que é diferente de ter tentado e não ter chegado. */
   entregas: EntregaDoLead[]
+  /** A mais recente. Uma reunião cancelada não vira histórico: é o estado atual
+   *  do lead, e mostrar a marcação antiga no lugar dela seria mentira. */
+  reuniao: ReuniaoDoLead | null
 }
 
 export async function listarLeads(s: Sessao, clienteId: string, limite = 100): Promise<LeadNaLista[]> {
@@ -142,7 +155,7 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
 
   // Limitado aos leads desta página: carregar as tentativas do cliente inteiro
   // cresce com a base e esta tela é a mais aberta do painel.
-  const [execucoes, contagens, entregas] = await Promise.all([
+  const [execucoes, contagens, entregas, reunioes] = await Promise.all([
     d
       .select({
         leadId: execucao.leadId,
@@ -168,6 +181,20 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
       .from(entrega)
       .where(inArray(entrega.leadId, ids))
       .orderBy(desc(entrega.criadoEm)),
+    d
+      .select({
+        leadId: reuniao.leadId,
+        status: reuniao.status,
+        provedor: reuniao.provedor,
+        inicio: reuniao.inicio,
+        responsavel: reuniao.responsavel,
+        motivoCancelamento: reuniao.motivoCancelamento,
+        linkEvento: reuniao.linkEvento,
+        linkAgendamento: reuniao.linkAgendamento,
+      })
+      .from(reuniao)
+      .where(inArray(reuniao.leadId, ids))
+      .orderBy(desc(reuniao.criadoEm)),
   ])
 
   // A execução mais recente é a que a tela mostra: é o estado atual do lead.
@@ -201,12 +228,26 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
     entregasPorLead.set(e.leadId, lista)
   }
 
+  const reuniaoPorLead = new Map<string, ReuniaoDoLead>()
+  for (const r of reunioes) {
+    if (reuniaoPorLead.has(r.leadId)) continue
+    reuniaoPorLead.set(r.leadId, {
+      status: r.status,
+      provedor: r.provedor,
+      inicio: r.inicio,
+      responsavel: r.responsavel,
+      motivoCancelamento: r.motivoCancelamento,
+      link: r.linkEvento ?? r.linkAgendamento,
+    })
+  }
+
   return leads.map((l) => ({
     ...l,
     estado: porExecucao.get(l.id)?.estado ?? null,
     motivo: porExecucao.get(l.id)?.motivo ?? null,
     contatos: porLead.get(l.id) ?? 0,
     entregas: entregasPorLead.get(l.id) ?? [],
+    reuniao: reuniaoPorLead.get(l.id) ?? null,
   }))
 }
 

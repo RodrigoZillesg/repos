@@ -175,8 +175,18 @@ num cliente sem CRM conectado era um `return` silencioso.
 A carga é a mesma nos quatro destinos, e inclui a reunião quando existe — é a
 primeira coisa que o comercial quer saber antes de ligar.
 
-A tela de Leads mostra, lead a lead, para onde ele foi e se chegou. Três estados
-que não são a mesma coisa e a tela não deixa confundir: **ainda no fluxo** (a
+A tela de Leads mostra, lead a lead, a reunião e para onde ele foi.
+
+Na coluna de resultado, a reunião vem antes do desfecho do fluxo, porque é o
+melhor resultado que este produto pode dar: horário e responsável quando está
+marcada, "link enviado, o lead ainda não escolheu horário" quando o fornecedor
+entrega link, e **reunião cancelada** com o motivo. Vale sempre a mais recente:
+uma reunião cancelada não é histórico, é o estado atual do lead, e mostrar a
+marcação antiga no lugar dela seria mentira. O horário aparece no fuso do
+cliente — quem lê a tela é o time que vai entrar na reunião.
+
+A coluna de entrega diz se o lead chegou. Três estados que não são a mesma
+coisa e a tela não deixa confundir: **ainda no fluxo** (a
 execução não chegou à etapa de saída), **não chegou** (tentou e falhou, com o
 motivo) e **qualificado e não entregue** — lead bom, fluxo encerrado e nenhuma
 entrega sequer tentada, que quase sempre é fluxo publicado sem etapa de saída.

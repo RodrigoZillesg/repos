@@ -76,6 +76,10 @@ const pt = {
   'leads.entrega.noFluxo': 'ainda no fluxo',
   'leads.entrega.naoChegou': 'não chegou',
   'leads.entrega.semSaida': 'qualificado e não entregue',
+  'leads.reuniao.marcada': 'reunião',
+  'leads.reuniao.linkEnviado': 'link de agenda enviado',
+  'leads.reuniao.semHorario': 'o lead ainda não escolheu horário',
+  'leads.reuniao.cancelada': 'reunião cancelada',
   'seco.aviso':
     'Modo seco: o fluxo roda inteiro e cada tentativa fica gravada, mas nada é enviado.',
 } as const
@@ -149,6 +153,10 @@ const en: Record<Chave, string> = {
   'leads.entrega.noFluxo': 'still in the flow',
   'leads.entrega.naoChegou': 'did not arrive',
   'leads.entrega.semSaida': 'qualified but never delivered',
+  'leads.reuniao.marcada': 'meeting',
+  'leads.reuniao.linkEnviado': 'booking link sent',
+  'leads.reuniao.semHorario': 'the lead has not picked a time yet',
+  'leads.reuniao.cancelada': 'meeting cancelled',
   'seco.aviso': 'Dry run: the flow runs in full and every attempt is recorded, but nothing is sent.',
 }
 
