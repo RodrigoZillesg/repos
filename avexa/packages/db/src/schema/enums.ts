@@ -79,6 +79,18 @@ export const reuniaoStatusEnum = pgEnum('reuniao_status', [
   'cancelada',
 ])
 
+/** Como terminou uma entrega do lead ao cliente.
+ *
+ *  `sem_destino` não é detalhe: é o fluxo pedindo um destino que o cliente não
+ *  configurou. Sem esse estado, esse caso é exatamente o que ninguém descobre —
+ *  o lead consta como entregue no fluxo e não chegou a lugar nenhum. */
+export const entregaEstadoEnum = pgEnum('entrega_estado', [
+  'entregue',
+  'falhou',
+  'sem_destino',
+  'seco',
+])
+
 export const numeroStatusEnum = pgEnum('numero_status', ['livre', 'reservado', 'atribuido', 'inativo'])
 
 export const idiomaEnum = pgEnum('idioma', ['pt-BR', 'en'])

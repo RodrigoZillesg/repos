@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db, integracao } from '@avexa/db'
-import { calendlyConfigurado, googleConfigurado } from '@avexa/servicos'
+import { calendlyConfigurado, googleConfigurado, hubspotConfigurado } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
 import { clientePadrao, listarClientes } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
@@ -12,8 +12,12 @@ import {
   desligar,
   escolherProvedorAgenda,
   salvarAgendas,
+  salvarEmailTime,
   salvarPlanilha,
+  salvarStatusHubspot,
   salvarTipoDeEvento,
+  salvarWebhook,
+  testarWebhook,
 } from './acoes'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +34,7 @@ const MENSAGEM: Record<string, string> = {
 export default async function PaginaIntegracoes({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string; erro?: string; conectado?: string }>
+  searchParams: Promise<{ cliente?: string; erro?: string; conectado?: string; aviso?: string }>
 }) {
   const s = await sessaoAtual()
   if (!s) redirect('/entrar')
@@ -71,15 +75,34 @@ export default async function PaginaIntegracoes({
       planilhaId: (cfg('google_sheets').planilhaId as string | undefined) ?? null,
       aba: (cfg('google_sheets').aba as string | undefined) ?? null,
     },
+    hubspotConfigurado: hubspotConfigurado(),
+    hubspot: {
+      conectada: conectada('hubspot'),
+      conta: (cfg('hubspot').conta as string | undefined) ?? null,
+      propriedadesOk: cfg('hubspot').propriedadesOk !== false,
+      statusDisponiveis:
+        (cfg('hubspot').statusDisponiveis as Array<{ valor: string; rotulo: string }> | undefined) ??
+        [],
+      statusQualificado: (cfg('hubspot').statusQualificado as string | undefined) ?? null,
+      statusNaoQualificado: (cfg('hubspot').statusNaoQualificado as string | undefined) ?? null,
+    },
+    webhook: {
+      url: (cfg('webhook').url as string | undefined) ?? null,
+      // Só se existe, nunca o valor: o segredo não sai do servidor depois de
+      // gravado, nem para a tela de quem o gerou.
+      temSegredo: Boolean(linhas.find((l) => l.tipo === 'webhook' && l.ativo)?.segredo),
+    },
+    emailTime: { para: (cfg('email_time').para as string | undefined) ?? null },
   }
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6 lg:p-8">
       <h1 className="text-xl font-semibold">Integrações</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-tinta-2)]">
-        O agendamento acontece na ferramenta que o cliente já usa. A Avexa não é dona da agenda nem
-        da planilha de ninguém: guardamos apenas a autorização, cifrada, e o cliente pode revogá-la
-        a qualquer momento pela própria conta.
+        Agenda, CRM e planilha são do cliente, e é neles que a Avexa trabalha. Não somos donos de
+        nada disso: guardamos apenas a autorização, cifrada, e o cliente pode revogá-la a qualquer
+        momento pela própria conta. Aqui também ficam os dois destinos que não dependem de conta
+        nenhuma — o webhook do sistema dele e o e-mail do time.
       </p>
 
       {clientes.length > 1 && (
@@ -110,8 +133,10 @@ export default async function PaginaIntegracoes({
       {q.conectado && (
         <Cartao className="mt-4 border-[var(--color-ok)]">
           <p className="text-[13px]">
-            <Selo tom="ok">conectado</Selo> Falta escolher o destino abaixo para a integração
-            funcionar.
+            <Selo tom="ok">conectado</Selo>{' '}
+            {q.aviso
+              ? decodeURIComponent(q.aviso)
+              : 'Falta escolher o destino abaixo para a integração funcionar.'}
           </p>
         </Cartao>
       )}
@@ -126,6 +151,10 @@ export default async function PaginaIntegracoes({
           aoSalvarTipoDeEvento={salvarTipoDeEvento}
           aoBuscarTipos={buscarTiposDeEvento}
           aoEscolherProvedor={escolherProvedorAgenda}
+          aoSalvarStatusHubspot={salvarStatusHubspot}
+          aoSalvarWebhook={salvarWebhook}
+          aoTestarWebhook={testarWebhook}
+          aoSalvarEmailTime={salvarEmailTime}
         />
       </div>
     </div>

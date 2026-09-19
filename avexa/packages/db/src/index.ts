@@ -23,3 +23,11 @@ export function db() {
 }
 
 export type Db = ReturnType<typeof db>
+
+/** Linhas como elas saem do banco. Evita que cada pacote reescreva o formato do
+ *  lead à mão e vá se afastando do schema aos poucos. */
+export type Lead = typeof schema.lead.$inferSelect
+export type Cliente = typeof schema.cliente.$inferSelect
+export type Integracao = typeof schema.integracao.$inferSelect
+export type Entrega = typeof schema.entrega.$inferSelect
+export type Reuniao = typeof schema.reuniao.$inferSelect

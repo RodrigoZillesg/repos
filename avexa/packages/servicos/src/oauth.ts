@@ -12,7 +12,7 @@ import { assinar, cifrar, conferirAssinatura, decifrar } from './cripto.ts'
  *  integração é como se acumulam diferenças sutis — uma delas guardando o token
  *  errado, outra não desligando quando o acesso é revogado. */
 
-export type TipoOAuth = 'google_calendar' | 'google_sheets' | 'calendly'
+export type TipoOAuth = 'google_calendar' | 'google_sheets' | 'calendly' | 'hubspot'
 
 export interface CredenciaisOAuth {
   accessToken: string
@@ -38,6 +38,7 @@ const NOME: Record<TipoOAuth, string> = {
   google_calendar: 'Google Calendar',
   google_sheets: 'Google Sheets',
   calendly: 'Calendly',
+  hubspot: 'HubSpot',
 }
 
 export async function salvarCredenciais(
@@ -208,7 +209,7 @@ export function montarState(clienteId: string, tipo: TipoOAuth): string {
   return assinar(JSON.stringify({ clienteId, tipo, em: Date.now() }))
 }
 
-const TIPOS: readonly TipoOAuth[] = ['google_calendar', 'google_sheets', 'calendly']
+const TIPOS: readonly TipoOAuth[] = ['google_calendar', 'google_sheets', 'calendly', 'hubspot']
 
 export function lerState(state: string | null): { clienteId: string; tipo: TipoOAuth } | null {
   const valor = conferirAssinatura(state)

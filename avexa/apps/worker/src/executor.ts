@@ -439,19 +439,33 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       return
     }
 
-    case 'entregar':
-      await entregarLead(amb, {
+    case 'entregar': {
+      const r = await entregarLead(amb, {
         leadId: p.lead.id,
         clienteId: p.clienteId,
+        execucaoId: p.execucaoId,
+        etapaId: p.etapa.id,
         destino: p.etapa.cfg.destino ?? 'Webhook do cliente',
         urgente: p.etapa.cfg.urgente === 'Sim',
         seco: p.seco,
       })
+      // No contexto porque uma condição depois pode querer saber: "entregou no
+      // CRM?" é uma pergunta legítima de fluxo, não só de auditoria.
+      p.contexto.entrega = {
+        ok: r.ok,
+        ...(r.destino ? { destino: r.destino } : {}),
+        ...(r.externoId ? { externoId: r.externoId } : {}),
+        ...(r.erro ? { erro: r.erro } : {}),
+      }
       return
+    }
 
-    case 'webhookout':
-      await dispararWebhookSaida(amb, {
+    case 'webhookout': {
+      const r = await dispararWebhookSaida(amb, {
         leadId: p.lead.id,
+        clienteId: p.clienteId,
+        execucaoId: p.execucaoId,
+        etapaId: p.etapa.id,
         url: p.etapa.cfg.url ?? '',
         metodo: p.etapa.cfg.metodo ?? 'POST',
         payload: p.etapa.cfg.payload ?? 'Lead completo com UTMs',
@@ -459,7 +473,12 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
         tentativas: p.etapa.cfg.retry === 'Tentar de novo 5 vezes' ? 5 : p.etapa.cfg.retry === 'Seguir sem reenviar' ? 1 : 3,
         seco: p.seco,
       })
+      p.contexto.webhookSaida = {
+        ok: r.ok,
+        ...(r.erro ? { erro: r.erro } : {}),
+      }
       return
+    }
 
     case 'agendar': {
       // Sem e-mail não há como convidar nem identificar quem marcou pelo link.

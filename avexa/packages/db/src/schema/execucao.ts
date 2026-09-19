@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import {
   canalEnum,
+  entregaEstadoEnum,
   eventoTipoEnum,
   execucaoEstadoEnum,
   provedorAgendaEnum,
@@ -222,5 +223,44 @@ export const reuniao = pgTable(
     index('reuniao_lead_idx').on(t.leadId),
     index('reuniao_cliente_idx').on(t.clienteId, t.inicio),
     index('reuniao_externo_idx').on(t.provedor, t.externoId),
+  ],
+)
+
+/** Toda tentativa de entregar o lead onde o cliente trabalha.
+ *
+ *  É o par da tabela `tentativa`: uma registra o contato com o lead, esta
+ *  registra o que foi feito com o lead depois. Sem ela, "entregar ao time"
+ *  falhava em silêncio — integração desconectada, token expirado, webhook do
+ *  cliente fora do ar — e o único sintoma era o comercial dizendo que não
+ *  chegou lead nenhum. */
+export const entrega = pgTable(
+  'entrega',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    leadId: uuid()
+      .notNull()
+      .references(() => lead.id, { onDelete: 'cascade' }),
+    clienteId: uuid()
+      .notNull()
+      .references(() => cliente.id, { onDelete: 'cascade' }),
+    execucaoId: uuid().references(() => execucao.id, { onDelete: 'set null' }),
+    etapaId: text(),
+    /** `hubspot`, `email_time`, `google_sheets`, `webhook` ou `webhook_saida`. */
+    destino: text().notNull(),
+    estado: entregaEstadoEnum().notNull(),
+    urgente: boolean().notNull().default(false),
+    tentativas: integer().notNull().default(1),
+    /** Id do que foi criado do outro lado: contato no HubSpot, linha na planilha. */
+    externoId: text(),
+    url: text(),
+    httpStatus: integer(),
+    erro: text(),
+    dryRun: boolean().notNull().default(false),
+    criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('entrega_lead_idx').on(t.leadId),
+    index('entrega_cliente_idx').on(t.clienteId, t.criadoEm),
+    index('entrega_estado_idx').on(t.estado, t.criadoEm),
   ],
 )

@@ -41,6 +41,7 @@ de script — relógio virtual, então uma espera de 24 horas não segura o test
     pnpm --filter @avexa/worker e2e:ativacao
     pnpm --filter @avexa/worker e2e:google
     pnpm --filter @avexa/worker e2e:calendly
+    pnpm --filter @avexa/worker e2e:entrega
 
 ## Entrar no painel em desenvolvimento
 
@@ -153,6 +154,76 @@ operação:
 Reunião marcada pelo link público do cliente, fora de um fluxo nosso, não casa com
 lead nenhum. Isso não é erro: a rota responde `200` (senão o Calendly reenviaria
 para sempre) e diz que não casou.
+
+## Entrega do lead
+
+O fim da linha, e o lugar onde um produto de outbound falha calado: o fluxo roda
+bonito, o lead é qualificado, e ninguém do outro lado recebe nada. Por isso
+**toda entrega deixa registro na tabela `entrega`** — inclusive a que não
+aconteceu. Os estados dizem coisas diferentes:
+
+| Estado | O que houve |
+| --- | --- |
+| `entregue` | chegou; `externo_id` guarda o id do contato, da linha ou da entrega |
+| `falhou` | o destino existe e recusou; `erro` e `http_status` dizem por quê |
+| `sem_destino` | o fluxo pediu um destino que este cliente não tem configurado |
+| `seco` | lead de teste: destino resolvido, nada enviado |
+
+`sem_destino` é o que motivou a tabela. Antes, um fluxo pedindo "CRM do cliente"
+num cliente sem CRM conectado era um `return` silencioso.
+
+A carga é a mesma nos quatro destinos, e inclui a reunião quando existe — é a
+primeira coisa que o comercial quer saber antes de ligar.
+
+### Webhook do cliente
+
+Cada envio leva:
+
+- `x-avexa-assinatura`: `t=<epoch>,v1=<HMAC-SHA256 de "<t>.<corpo cru>">`, com o
+  segredo do cliente. Sem isso, quem descobrir a URL inventa lead na base dele.
+  É o mesmo formato que a Avexa exige de quem manda webhook **para** cá: o
+  cliente aprende uma vez.
+- `x-avexa-entrega`: id estável **entre reenvios**. Sem ele, um 500 do lado do
+  cliente vira lead duplicado na base dele.
+- `x-avexa-tentativa`: qual reenvio é este.
+
+O corpo é serializado uma vez e assinado como sai: reserializar o JSON muda
+espaço e ordem de chave e a assinatura deixa de bater. Reenvio com recuo
+exponencial só para o que é passageiro (timeout, 429, 5xx); 4xx não é reenviado,
+porque insistir num erro do cliente só gasta a cota dele.
+
+O segredo é gerado por nós, mostrado uma vez e guardado cifrado. A URL precisa
+ser https — exceto em `localhost`, para o cliente testar na própria máquina antes
+de publicar. O botão "Mandar um lead de teste" dispara uma carga de exemplo com
+a assinatura de verdade: quase toda integração quebra na primeira entrega real, e
+descobrir isso com um lead quente na mão é caro.
+
+## HubSpot
+
+Cada cliente conecta o próprio portal por OAuth, pela aba Integrações. Sem token
+de private app: ele é um segredo de longa duração que alguém teria de copiar e
+colar no painel, e um segredo colado é um segredo que circula por e-mail.
+
+Conectar faz três coisas, nessa ordem:
+
+1. guarda o refresh token cifrado (o access token do HubSpot dura 30 minutos);
+2. cria as propriedades `avexa_score`, `avexa_resumo`, `avexa_etiquetas` e
+   `avexa_origem` no portal — descobrir que falta propriedade no meio de um lead
+   quente é tarde demais;
+3. lê as opções de `hs_lead_status` **daquele** portal, para o operador escolher
+   qual significa qualificado. A Avexa nunca inventa esse valor: quase toda
+   empresa customiza esse campo, e mandar um valor que o portal não tem devolve
+   400 e derruba a entrega inteira.
+
+A entrega é **upsert**, nunca "criar contato": por e-mail quando há e-mail (a
+propriedade única do HubSpot), por busca de telefone quando não há. O mesmo lead
+volta por reenvio e por segunda campanha, e três contatos duplicados no CRM do
+cliente é pior do que não entregar. A conversa vira nota na linha do tempo do
+contato; se o portal não concedeu o escopo de notas, o contato é gravado assim
+mesmo e o painel avisa — perder a nota não pode custar o lead.
+
+Escopos pedidos: contatos (leitura e escrita) e esquema de contatos. Nunca um
+escopo amplo de CRM, que seria acesso à base comercial inteira do cliente.
 
 ## Monitor
 

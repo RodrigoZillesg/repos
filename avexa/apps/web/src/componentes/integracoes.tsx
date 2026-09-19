@@ -1,7 +1,16 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { CalendarClock, CalendarDays, Link2Off, Sheet, TriangleAlert } from 'lucide-react'
+import {
+  CalendarClock,
+  CalendarDays,
+  Contact,
+  Link2Off,
+  Mail,
+  Sheet,
+  TriangleAlert,
+  Webhook,
+} from 'lucide-react'
 import type { ProvedorAgenda } from '@avexa/core'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
@@ -20,9 +29,22 @@ export interface EstadoCliente {
     tipoDeEventoDuracao: number | null
   }
   sheets: { conectada: boolean; planilhaId: string | null; aba: string | null }
+  hubspotConfigurado: boolean
+  hubspot: {
+    conectada: boolean
+    conta: string | null
+    propriedadesOk: boolean
+    statusDisponiveis: Array<{ valor: string; rotulo: string }>
+    statusQualificado: string | null
+    statusNaoQualificado: string | null
+  }
+  webhook: { url: string | null; temSegredo: boolean }
+  emailTime: { para: string | null }
 }
 
-type Tipo = 'google_calendar' | 'google_sheets' | 'calendly'
+type Tipo = 'google_calendar' | 'google_sheets' | 'calendly' | 'hubspot' | 'webhook' | 'email_time'
+/** Os que passam por consentimento OAuth — os outros são configuração nossa. */
+type TipoConectavel = 'google_calendar' | 'google_sheets' | 'calendly' | 'hubspot'
 
 interface Props {
   estado: EstadoCliente
@@ -40,6 +62,14 @@ interface Props {
     c: string,
   ) => Promise<{ tipos: Array<{ uri: string; nome: string; duracaoMin: number }> } | { erro: string }>
   aoEscolherProvedor: (c: string, p: ProvedorAgenda) => Promise<{ ok: boolean }>
+  aoSalvarStatusHubspot: (c: string, qualificado: string, naoQualificado: string) => Promise<{ ok: boolean }>
+  aoSalvarWebhook: (
+    c: string,
+    url: string,
+    regerar: boolean,
+  ) => Promise<{ ok: boolean; segredo?: string; erro?: string }>
+  aoTestarWebhook: (c: string) => Promise<{ ok: boolean; status: number; erro?: string }>
+  aoSalvarEmailTime: (c: string, para: string) => Promise<{ ok: boolean; erro?: string }>
 }
 
 function Conectar({
@@ -49,7 +79,7 @@ function Conectar({
   rotulo,
 }: {
   clienteId: string
-  tipo: Tipo
+  tipo: TipoConectavel
   disponivel: boolean
   rotulo: string
 }) {
@@ -81,6 +111,11 @@ export function Integracoes(p: Props) {
   const [aba, setAba] = useState(e.sheets.aba ?? 'Leads')
   const [tipos, setTipos] = useState<Array<{ uri: string; nome: string; duracaoMin: number }>>([])
   const [tipoEscolhido, setTipoEscolhido] = useState(e.calendly.tipoDeEvento ?? '')
+  const [statusQual, setStatusQual] = useState(e.hubspot.statusQualificado ?? '')
+  const [statusNao, setStatusNao] = useState(e.hubspot.statusNaoQualificado ?? '')
+  const [urlWebhook, setUrlWebhook] = useState(e.webhook.url ?? '')
+  const [segredoNovo, setSegredoNovo] = useState<string | null>(null)
+  const [emailTime, setEmailTime] = useState(e.emailTime.para ?? '')
 
   const duasAgendas = e.calendar.conectada && e.calendly.conectada
   const ativo: ProvedorAgenda | null = e.provedorEscolhido
@@ -377,6 +412,275 @@ export function Integracoes(p: Props) {
             </div>
           </>
         )}
+      </Cartao>
+
+
+      {/* -------------------------------- HubSpot -------------------------------- */}
+      <Cartao>
+        <div className="flex flex-wrap items-center gap-2">
+          <Contact size={15} />
+          <h3 className="text-sm font-semibold">HubSpot</h3>
+          {!e.hubspot.conectada ? (
+            <Selo>não conectado</Selo>
+          ) : !e.hubspot.propriedadesOk ? (
+            <Selo tom="alerta">conectado, sem as propriedades da Avexa</Selo>
+          ) : (
+            <Selo tom="ok">{e.hubspot.conta ? `portal ${e.hubspot.conta}` : 'pronto'}</Selo>
+          )}
+        </div>
+        <Ajuda>
+          O destino “CRM do cliente” grava o contato com score, resumo e etiquetas, e deixa a
+          conversa como nota na linha do tempo. O contato é atualizado, nunca duplicado: o mesmo
+          lead volta por reenvio e por segunda campanha.
+        </Ajuda>
+
+        {!e.hubspotConfigurado && (
+          <SemCredencial o_que="HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET e APP_SECRET" />
+        )}
+
+        {!e.hubspot.conectada ? (
+          <Conectar
+            clienteId={e.clienteId}
+            tipo="hubspot"
+            disponivel={p.podeAdministrar && e.hubspotConfigurado}
+            rotulo="Conectar HubSpot"
+          />
+        ) : (
+          <>
+            {!e.hubspot.propriedadesOk && (
+              <p className="mt-3 flex items-start gap-2 text-xs text-[var(--color-alerta)]">
+                <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+                As propriedades <code>avexa_score</code> e <code>avexa_resumo</code> não existem
+                neste portal. O contato é gravado sem elas. Reconecte depois de liberar o escopo de
+                esquema de contatos.
+              </p>
+            )}
+
+            {e.hubspot.statusDisponiveis.length > 0 ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Rotulo htmlFor="stq">Status quando qualificado</Rotulo>
+                  <Selecao
+                    id="stq"
+                    value={statusQual}
+                    disabled={!p.podeAdministrar}
+                    onChange={(ev) => setStatusQual(ev.target.value)}
+                  >
+                    <option value="">— não mexer no status —</option>
+                    {e.hubspot.statusDisponiveis.map((o) => (
+                      <option key={o.valor} value={o.valor}>
+                        {o.rotulo}
+                      </option>
+                    ))}
+                  </Selecao>
+                </div>
+                <div>
+                  <Rotulo htmlFor="stn">Status quando não qualificado</Rotulo>
+                  <Selecao
+                    id="stn"
+                    value={statusNao}
+                    disabled={!p.podeAdministrar}
+                    onChange={(ev) => setStatusNao(ev.target.value)}
+                  >
+                    <option value="">— não mexer no status —</option>
+                    {e.hubspot.statusDisponiveis.map((o) => (
+                      <option key={o.valor} value={o.valor}>
+                        {o.rotulo}
+                      </option>
+                    ))}
+                  </Selecao>
+                </div>
+              </div>
+            ) : (
+              <Ajuda>
+                Não deu para ler os status de lead deste portal, então a Avexa não mexe nesse campo.
+              </Ajuda>
+            )}
+            <Ajuda>
+              As opções vêm do portal do cliente, não de uma lista nossa: cada empresa renomeia esse
+              campo, e mandar um valor que o portal não tem derruba a entrega inteira.
+            </Ajuda>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Botao
+                tamanho="pequeno"
+                disabled={!p.podeAdministrar || pendente}
+                onClick={() =>
+                  rodar(() => p.aoSalvarStatusHubspot(e.clienteId, statusQual, statusNao), 'Salvo.')
+                }
+              >
+                Salvar
+              </Botao>
+              <Botao
+                variante="perigo"
+                tamanho="pequeno"
+                disabled={!p.podeAdministrar || pendente}
+                onClick={() =>
+                  rodar(
+                    () => p.aoDesligar(e.clienteId, 'hubspot'),
+                    'Desconectado. Remova também o app da Avexa em Integrações, na conta HubSpot.',
+                  )
+                }
+              >
+                <Link2Off size={12} /> Desconectar
+              </Botao>
+            </div>
+          </>
+        )}
+      </Cartao>
+
+      {/* --------------------------- Webhook do cliente -------------------------- */}
+      <Cartao>
+        <div className="flex flex-wrap items-center gap-2">
+          <Webhook size={15} />
+          <h3 className="text-sm font-semibold">Webhook do cliente</h3>
+          {!e.webhook.url ? (
+            <Selo>não configurado</Selo>
+          ) : e.webhook.temSegredo ? (
+            <Selo tom="ok">assinando</Selo>
+          ) : (
+            <Selo tom="alerta">sem segredo de assinatura</Selo>
+          )}
+        </div>
+        <Ajuda>
+          Para onde vai o destino “Webhook do cliente” e também o nó de webhook do meio do fluxo.
+          Cada envio leva assinatura e um id de entrega: sem assinatura, quem descobrir a URL
+          inventa lead na base do cliente; sem id, um reenvio vira lead duplicado.
+        </Ajuda>
+
+        <div className="mt-4">
+          <Rotulo htmlFor="whurl">URL</Rotulo>
+          <Entrada
+            id="whurl"
+            value={urlWebhook}
+            disabled={!p.podeAdministrar}
+            onChange={(ev) => setUrlWebhook(ev.target.value)}
+            placeholder="https://sistema-do-cliente.com/avexa"
+            className="font-mono text-xs"
+          />
+          <Ajuda>Só https: a carga leva nome, telefone e e-mail do lead.</Ajuda>
+        </div>
+
+        {segredoNovo && (
+          <div className="mt-3 rounded-[var(--radius-cartao)] border border-[var(--color-ok)] p-3">
+            <p className="text-xs font-medium">Segredo de assinatura — copie agora</p>
+            <code className="mt-1 block break-all font-mono text-xs">{segredoNovo}</code>
+            <p className="mt-1.5 text-xs text-[var(--color-tinta-2)]">
+              Guardamos cifrado e não mostramos de novo. O cliente confere assim:{' '}
+              <code>HMAC-SHA256(&quot;&lt;t&gt;.&lt;corpo cru&gt;&quot;)</code> contra o cabeçalho{' '}
+              <code>x-avexa-assinatura</code>.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Botao
+            tamanho="pequeno"
+            disabled={!p.podeAdministrar || pendente || !urlWebhook}
+            onClick={() =>
+              iniciar(async () => {
+                const r = await p.aoSalvarWebhook(e.clienteId, urlWebhook, false)
+                setSegredoNovo(r.segredo ?? null)
+                setAviso(r.ok ? 'Salvo.' : (r.erro ?? 'Não foi possível salvar.'))
+              })
+            }
+          >
+            Salvar
+          </Botao>
+          <Botao
+            variante="contorno"
+            tamanho="pequeno"
+            disabled={!p.podeAdministrar || pendente || !e.webhook.url}
+            onClick={() =>
+              iniciar(async () => {
+                const r = await p.aoTestarWebhook(e.clienteId)
+                setAviso(
+                  r.ok
+                    ? `O endpoint respondeu ${r.status}. A assinatura que ele recebeu é a mesma dos leads de verdade.`
+                    : `Falhou: ${r.erro ?? `HTTP ${r.status}`}`,
+                )
+              })
+            }
+          >
+            Mandar um lead de teste
+          </Botao>
+          <Botao
+            variante="contorno"
+            tamanho="pequeno"
+            disabled={!p.podeAdministrar || pendente || !e.webhook.url}
+            onClick={() =>
+              iniciar(async () => {
+                const r = await p.aoSalvarWebhook(e.clienteId, urlWebhook, true)
+                setSegredoNovo(r.segredo ?? null)
+                setAviso(
+                  r.ok
+                    ? 'Segredo trocado. O anterior parou de valer agora.'
+                    : (r.erro ?? 'Não foi possível trocar.'),
+                )
+              })
+            }
+          >
+            Trocar o segredo
+          </Botao>
+          {e.webhook.url && (
+            <Botao
+              variante="perigo"
+              tamanho="pequeno"
+              disabled={!p.podeAdministrar || pendente}
+              onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'webhook'), 'Removido.')}
+            >
+              <Link2Off size={12} /> Remover
+            </Botao>
+          )}
+        </div>
+      </Cartao>
+
+      {/* ----------------------------- E-mail do time ---------------------------- */}
+      <Cartao>
+        <div className="flex flex-wrap items-center gap-2">
+          <Mail size={15} />
+          <h3 className="text-sm font-semibold">E-mail do time</h3>
+          {e.emailTime.para ? <Selo tom="ok">pronto</Selo> : <Selo>não configurado</Selo>}
+        </div>
+        <Ajuda>
+          O destino mais simples, e o que mais salva ativação: um aviso com score, resumo e reunião
+          marcada para quem vai ligar.
+        </Ajuda>
+        <div className="mt-4">
+          <Rotulo htmlFor="mailtime">Para</Rotulo>
+          <Entrada
+            id="mailtime"
+            value={emailTime}
+            disabled={!p.podeAdministrar}
+            onChange={(ev) => setEmailTime(ev.target.value)}
+            placeholder="comercial@cliente.com"
+            className="font-mono text-xs"
+          />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Botao
+            tamanho="pequeno"
+            disabled={!p.podeAdministrar || pendente || !emailTime}
+            onClick={() =>
+              iniciar(async () => {
+                const r = await p.aoSalvarEmailTime(e.clienteId, emailTime)
+                setAviso(r.ok ? 'Salvo.' : (r.erro ?? 'Não foi possível salvar.'))
+              })
+            }
+          >
+            Salvar
+          </Botao>
+          {e.emailTime.para && (
+            <Botao
+              variante="perigo"
+              tamanho="pequeno"
+              disabled={!p.podeAdministrar || pendente}
+              onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'email_time'), 'Removido.')}
+            >
+              <Link2Off size={12} /> Remover
+            </Botao>
+          )}
+        </div>
       </Cartao>
 
       {aviso && <p className="text-xs text-[var(--color-tinta-2)]">{aviso}</p>}

@@ -31,6 +31,12 @@ const CAMADAS = [
     nota: 'O Avexa não impõe calendário: agenda-se na ferramenta que o cliente já usa. O Google marca direto num horário livre; o Calendly entrega um link de uso único e a reunião só passa a existir quando o webhook avisa que o lead escolheu o horário.',
   },
   {
+    nome: 'Entrega ao cliente',
+    sub: 'onde o lead qualificado vai parar',
+    itens: ['CRM (HubSpot)', 'Webhook assinado', 'E-mail do time', 'Planilha compartilhada'],
+    nota: 'Toda entrega deixa registro, inclusive a que não aconteceu: destino não configurado, token expirado, endpoint do cliente fora do ar. Um fluxo impecável que não entrega o lead não serviu para nada, e esse é o jeito mais silencioso de falhar.',
+  },
+  {
     nome: 'Fornecedores',
     sub: 'trocáveis peça por peça',
     itens: [
@@ -39,6 +45,7 @@ const CAMADAS = [
       'SMS: Twilio',
       'E-mail: Resend',
       'Agenda: conta do próprio cliente',
+      'CRM: portal do próprio cliente',
     ],
   },
 ] as const
@@ -51,6 +58,8 @@ const COMPARTILHADO = [
   ['Fluxos', 'Modelos de partida e os nós disponíveis', 'Quantos fluxos quiser, cada um com sua URL de entrada'],
   ['Supressão', 'Lista única por pessoa, válida em todo canal e todo cliente', 'Nada: ninguém tem lista própria'],
   ['Agenda', 'Nada: a conexão é da conta do cliente, autorizada por ele', 'Google Calendar ou Calendly, com as agendas ou o tipo de evento que ele escolher'],
+  ['CRM', 'Nada: o portal é do cliente e ele revoga quando quiser', 'HubSpot conectado por OAuth, com as propriedades da Avexa criadas no portal dele'],
+  ['Webhook', 'O formato da carga e da assinatura, igual para todo mundo', 'URL e segredo próprios; o segredo é gerado aqui e mostrado uma vez'],
 ] as const
 
 const REGRAS = [
@@ -60,6 +69,7 @@ const REGRAS = [
   ['Só em horário útil', 'Fuso do lead. Fora da janela, a tentativa espera a manhã seguinte.'],
   ['Teto de tentativas', 'O fluxo pode pedir menos que o teto do sistema, nunca mais.'],
   ['Subfluxo não vira laço', 'Um fluxo pode chamar outro, mas o motor corta a cadeia se ela voltar ao ponto de partida.'],
+  ['Entrega nunca falha calada', 'Lead que não chegou ao cliente vira registro com o motivo, e aparece no monitor. Reenvio usa sempre o mesmo id, para não duplicar lead do outro lado.'],
   ['Reunião só com horário confirmado', 'Enquanto o lead não escolher o horário, existe uma oferta, não uma reunião. E um texto que pede o link de agenda não sai sem ele.'],
 ] as const
 

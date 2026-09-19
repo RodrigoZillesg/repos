@@ -18,6 +18,10 @@ export interface OpcoesHttp {
   metodo?: string
   cabecalhos?: Record<string, string>
   corpo?: unknown
+  /** Corpo já serializado, enviado byte a byte como está.
+   *  Existe para assinatura: quem assina precisa assinar exatamente o que sai,
+   *  e reserializar o objeto na hora do envio pode mudar a ordem das chaves. */
+  corpoCru?: string
   /** Envia como form-urlencoded em vez de JSON. O Twilio exige. */
   formulario?: boolean
   timeoutMs?: number
@@ -33,7 +37,10 @@ export async function requisitar(url: string, o: OpcoesHttp = {}): Promise<Respo
     const cabecalhos: Record<string, string> = { ...o.cabecalhos }
     let corpo: string | undefined
 
-    if (o.corpo !== undefined) {
+    if (o.corpoCru !== undefined) {
+      cabecalhos['content-type'] ??= 'application/json'
+      corpo = o.corpoCru
+    } else if (o.corpo !== undefined) {
       if (o.formulario) {
         cabecalhos['content-type'] = 'application/x-www-form-urlencoded'
         corpo = new URLSearchParams(o.corpo as Record<string, string>).toString()

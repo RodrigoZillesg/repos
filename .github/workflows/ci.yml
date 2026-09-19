@@ -110,3 +110,9 @@ jobs:
       # assinado avisa que o lead escolheu o horário.
       - name: Integração Calendly
         run: pnpm --filter @avexa/worker e2e:calendly
+
+      # O fim da linha: o lead chegando onde o cliente trabalha. O webhook é
+      # servido por um servidor HTTP local de verdade, para a assinatura ser
+      # conferida do outro lado como o cliente vai conferir.
+      - name: Entrega ao cliente
+        run: pnpm --filter @avexa/worker e2e:entrega

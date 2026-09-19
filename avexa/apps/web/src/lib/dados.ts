@@ -4,6 +4,7 @@ import {
   cliente,
   clienteCanal,
   db,
+  entrega,
   execucao,
   fluxo,
   fluxoVersao,
@@ -177,6 +178,10 @@ export interface ResumoMonitor {
   /** Contatos por dia e por canal, para as pequenas séries. */
   serie: Array<{ dia: string; ligacao: number; whatsapp: number; sms: number; email: number }>
   bloqueios: Array<{ motivo: string; n: number }>
+  /** O que aconteceu com o lead depois de qualificado. Um fluxo impecável que
+   *  não entrega o lead é um fluxo que não serviu para nada. */
+  entregas: Array<{ destino: string; entregues: number; falhas: number; semDestino: number }>
+  falhasDeEntrega: Array<{ destino: string; erro: string | null; quando: Date }>
   paradas: Array<{ id: string; lead: string; fluxo: string; retomarEm: Date | null }>
   falhas: Array<{ canal: string; provedor: string | null; erro: string | null; quando: Date | null }>
 }
@@ -192,7 +197,7 @@ export async function resumoMonitor(
   const desde = new Date(Date.now() - dias * 86_400_000)
   const alvo = s.permissoes.escopoCliente ? (s.clienteId ?? clienteId) : clienteId
 
-  const [tentativas, leadsRecebidos, execucoesParadas, suprimidos] = await Promise.all([
+  const [tentativas, leadsRecebidos, execucoesParadas, suprimidos, entregas] = await Promise.all([
     d
       .select({
         canal: tentativa.canal,
@@ -225,6 +230,15 @@ export async function resumoMonitor(
       .orderBy(execucao.retomarEm)
       .limit(25),
     d.select({ id: supressao.id }).from(supressao),
+    d
+      .select({
+        destino: entrega.destino,
+        estado: entrega.estado,
+        erro: entrega.erro,
+        criadoEm: entrega.criadoEm,
+      })
+      .from(entrega)
+      .where(and(eq(entrega.clienteId, alvo), gte(entrega.criadoEm, desde))),
   ])
 
   const respondeu = (t: (typeof tentativas)[number]) => t.respondidaEm !== null
@@ -279,7 +293,7 @@ export async function resumoMonitor(
       leads: leadsRecebidos.length,
       contatos: tentativas.filter(saiu).length,
       respostas: tentativas.filter(respondeu).length,
-      entregues: 0,
+      entregues: entregas.filter((e) => e.estado === 'entregue').length,
       suprimidosTotal: suprimidos.length,
     },
     porCanal,
@@ -298,5 +312,19 @@ export async function resumoMonitor(
       .sort((a, b) => (b.executadaEm?.getTime() ?? 0) - (a.executadaEm?.getTime() ?? 0))
       .slice(0, 10)
       .map((t) => ({ canal: t.canal, provedor: t.provedor, erro: t.erro, quando: t.executadaEm })),
+    entregas: [...new Set(entregas.map((e) => e.destino))].map((destino) => {
+      const linhas = entregas.filter((e) => e.destino === destino)
+      return {
+        destino,
+        entregues: linhas.filter((e) => e.estado === 'entregue').length,
+        falhas: linhas.filter((e) => e.estado === 'falhou').length,
+        semDestino: linhas.filter((e) => e.estado === 'sem_destino').length,
+      }
+    }),
+    falhasDeEntrega: entregas
+      .filter((e) => e.estado === 'falhou' || e.estado === 'sem_destino')
+      .sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime())
+      .slice(0, 10)
+      .map((e) => ({ destino: e.destino, erro: e.erro, quando: e.criadoEm })),
   }
 }

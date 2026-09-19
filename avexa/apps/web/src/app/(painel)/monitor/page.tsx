@@ -14,6 +14,14 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+const NOME_DESTINO: Record<string, string> = {
+  hubspot: 'CRM do cliente (HubSpot)',
+  email_time: 'E-mail do time',
+  google_sheets: 'Planilha compartilhada',
+  webhook: 'Webhook do cliente',
+  webhook_saida: 'Webhook no meio do fluxo',
+}
+
 /** Monitor de qualidade.
  *
  *  Não responde "quantos leads" — responde "está saindo contato?", "o que está
@@ -43,6 +51,9 @@ export default async function PaginaMonitor({
     .map(([k]) => k)
   const taxa = m.kpis.contatos > 0 ? Math.round((m.kpis.respostas / m.kpis.contatos) * 100) : null
   const semContato = m.kpis.contatos === 0 && m.kpis.leads > 0
+  // Entrega que não aconteceu conta como falha aqui, inclusive a que nem tentou
+  // por falta de destino: o lead não chegou ao cliente, que é o que importa.
+  const falhasDeEntrega = m.entregas.reduce((n, e) => n + e.falhas + e.semDestino, 0)
 
   const canais = ['ligacao', 'whatsapp', 'sms', 'email'] as const
 
@@ -87,7 +98,7 @@ export default async function PaginaMonitor({
         </Cartao>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Tile rotulo="Leads recebidos" valor={String(m.kpis.leads)} nota={`em ${m.dias} dias`} />
         <Tile
           rotulo="Contatos que saíram"
@@ -98,6 +109,16 @@ export default async function PaginaMonitor({
           rotulo="Taxa de resposta"
           valor={taxa === null ? '—' : `${taxa}%`}
           nota={`${m.kpis.respostas} resposta(s)`}
+        />
+        <Tile
+          rotulo="Leads entregues"
+          valor={String(m.kpis.entregues)}
+          nota={
+            falhasDeEntrega > 0
+              ? `${falhasDeEntrega} não chegaram`
+              : 'ao CRM, webhook, time ou planilha'
+          }
+          {...(falhasDeEntrega > 0 ? { tom: 'alerta' as const } : {})}
         />
         <Tile
           rotulo="Na supressão"
@@ -175,6 +196,52 @@ export default async function PaginaMonitor({
           </Cartao>
         </section>
       </div>
+
+      {m.entregas.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-1 text-sm font-semibold">Entrega do lead ao cliente</h2>
+          <p className="mb-3 text-xs text-[var(--color-tinta-2)]">
+            O fim da linha. Um fluxo impecável que não entrega o lead não serviu para nada — e
+            “destino não configurado” é o jeito mais silencioso de isso acontecer.
+          </p>
+          <Cartao className="p-0">
+            <ul className="divide-y">
+              {m.entregas.map((e) => (
+                <li key={e.destino} className="flex flex-wrap items-center gap-2 p-3 text-[13px]">
+                  <span className="font-medium">{NOME_DESTINO[e.destino] ?? e.destino}</span>
+                  <span className="ml-auto flex items-center gap-2">
+                    <span className="text-xs tabular-nums text-[var(--color-tinta-2)]">
+                      {e.entregues} entregue{e.entregues === 1 ? '' : 's'}
+                    </span>
+                    {e.falhas > 0 && <Selo tom="alerta">{e.falhas} falhou</Selo>}
+                    {e.semDestino > 0 && <Selo tom="alerta">{e.semDestino} sem destino</Selo>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Cartao>
+
+          {m.falhasDeEntrega.length > 0 && (
+            <Cartao className="mt-3 p-0">
+              <ul className="divide-y">
+                {m.falhasDeEntrega.map((f, i) => (
+                  <li key={i} className="p-3 text-[13px]">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Selo tom="alerta">{NOME_DESTINO[f.destino] ?? f.destino}</Selo>
+                      <span className="ml-auto text-xs tabular-nums text-[var(--color-tinta-3)]">
+                        {f.quando.toISOString().slice(0, 16).replace('T', ' ')}
+                      </span>
+                    </span>
+                    <span className="mt-1 block break-words text-xs text-[var(--color-tinta-2)]">
+                      {f.erro ?? '—'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Cartao>
+          )}
+        </section>
+      )}
 
       {m.falhas.length > 0 && (
         <section className="mt-8">

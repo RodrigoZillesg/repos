@@ -1,13 +1,17 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq } from 'drizzle-orm'
-import { cliente, db } from '@avexa/db'
+import { and, eq } from 'drizzle-orm'
+import { cliente, db, integracao } from '@avexa/db'
+import { entregarWebhook } from '@avexa/adapters'
 import {
   definirDestino,
+  definirWebhookDoCliente,
   desconectarCalendly,
   desconectarGoogle,
+  desconectarHubspot,
   listarTiposDeEvento,
+  webhookDoCliente,
   type TipoGoogle,
   type TipoOAuth,
 } from '@avexa/servicos'
@@ -19,10 +23,117 @@ async function exigirAdmin() {
   return s?.permissoes.administrar ? s : null
 }
 
-export async function desligar(clienteId: string, tipo: TipoOAuth): Promise<{ ok: boolean }> {
+export type TipoIntegracao = TipoOAuth | 'webhook' | 'email_time'
+
+export async function desligar(clienteId: string, tipo: TipoIntegracao): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
   if (tipo === 'calendly') await desconectarCalendly(db(), clienteId)
-  else await desconectarGoogle(db(), clienteId, tipo as TipoGoogle)
+  else if (tipo === 'hubspot') await desconectarHubspot(db(), clienteId)
+  else if (tipo === 'webhook' || tipo === 'email_time') {
+    await db().delete(integracao).where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
+  } else await desconectarGoogle(db(), clienteId, tipo as TipoGoogle)
+  revalidatePath('/integracoes')
+  return { ok: true }
+}
+
+export async function salvarStatusHubspot(
+  clienteId: string,
+  qualificado: string,
+  naoQualificado: string,
+): Promise<{ ok: boolean }> {
+  if (!(await exigirAdmin())) return { ok: false }
+  await definirDestino(db(), clienteId, 'hubspot', {
+    statusQualificado: qualificado || null,
+    statusNaoQualificado: naoQualificado || null,
+  })
+  revalidatePath('/integracoes')
+  return { ok: true }
+}
+
+/** Salva a URL do webhook. O segredo volta uma vez e não é mostrado de novo. */
+export async function salvarWebhook(
+  clienteId: string,
+  url: string,
+  regerar: boolean,
+): Promise<{ ok: boolean; segredo?: string; erro?: string }> {
+  if (!(await exigirAdmin())) return { ok: false, erro: 'sem permissão' }
+  const r = await definirWebhookDoCliente(db(), clienteId, url.trim(), regerar)
+  revalidatePath('/integracoes')
+  return r
+}
+
+/** Manda uma carga de exemplo, assinada igual à de verdade.
+ *
+ *  Vale mais do que parece: quase toda integração de cliente quebra na primeira
+ *  entrega real, e descobrir isso com um lead quente na mão é caro. */
+export async function testarWebhook(
+  clienteId: string,
+): Promise<{ ok: boolean; status: number; erro?: string }> {
+  if (!(await exigirAdmin())) return { ok: false, status: 0, erro: 'sem permissão' }
+  const alvo = await webhookDoCliente(db(), clienteId)
+  if (!alvo) return { ok: false, status: 0, erro: 'webhook sem URL' }
+
+  const entregaId = `teste-${Date.now()}`
+  const r = await entregarWebhook({
+    url: alvo.url,
+    corpo: {
+      tipo: 'lead.teste',
+      entregaId,
+      dados: {
+        id: '00000000-0000-0000-0000-000000000000',
+        nome: 'Lead de teste da Avexa',
+        telefone: '+61400000000',
+        email: 'teste@avexa.global',
+        score: 87,
+        motivo: 'carga de exemplo, nenhum lead real',
+        resumo: 'Mensagem de teste disparada pelo painel.',
+        etiquetas: ['teste'],
+        campos: {},
+        utm: {},
+        criadoEm: new Date().toISOString(),
+        urgente: false,
+      },
+    },
+    segredo: alvo.segredo ?? undefined,
+    entregaId,
+    // Teste não insiste: o operador está olhando a tela agora.
+    tentativas: 1,
+    timeoutMs: 10_000,
+  })
+  return { ok: r.ok, status: r.status, ...(r.erro ? { erro: r.erro } : {}) }
+}
+
+export async function salvarEmailTime(
+  clienteId: string,
+  para: string,
+): Promise<{ ok: boolean; erro?: string }> {
+  if (!(await exigirAdmin())) return { ok: false, erro: 'sem permissão' }
+  const endereco = para.trim()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(endereco)) {
+    return { ok: false, erro: 'endereço inválido' }
+  }
+
+  const d = db()
+  const [linha] = await d
+    .select()
+    .from(integracao)
+    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, 'email_time')))
+    .limit(1)
+
+  if (linha) {
+    await d
+      .update(integracao)
+      .set({ config: { ...(linha.config ?? {}), para: endereco }, ativo: true })
+      .where(eq(integracao.id, linha.id))
+  } else {
+    await d.insert(integracao).values({
+      clienteId,
+      tipo: 'email_time',
+      nome: 'Time comercial',
+      config: { para: endereco },
+    })
+  }
+
   revalidatePath('/integracoes')
   return { ok: true }
 }

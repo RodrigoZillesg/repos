@@ -24,7 +24,11 @@ export async function GET(req: Request) {
   if (!s?.permissoes.administrar) return volta('erro=sem-permissao')
 
   const estado = lerState(url.searchParams.get('state'))
-  if (!estado || estado.tipo === 'calendly') return volta('erro=state-invalido')
+  // Positivo, não por exclusão: listar o que esta rota aceita faz o compilador
+  // apontar aqui quando entrar um fornecedor novo, em vez de deixar passar.
+  if (estado?.tipo !== 'google_calendar' && estado?.tipo !== 'google_sheets') {
+    return volta('erro=state-invalido')
+  }
 
   const codigo = url.searchParams.get('code')
   if (!codigo) return volta('erro=sem-codigo')
