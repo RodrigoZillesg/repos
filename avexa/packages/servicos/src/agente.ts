@@ -1,9 +1,11 @@
+import { timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { agenteVoz, cliente, clienteCanal, configGlobal, numero, type Db } from '@avexa/db'
 import {
   atualizarAssistente,
   criarAssistente,
   importarNumeroNaVapi,
+  segredoDoWebhookVapi,
   vincularAssistenteAoNumero,
   type AssistenteVapi,
   type CredenciaisTwilio,
@@ -36,6 +38,32 @@ export function webhookDeLigacao(
 ): string | null {
   const dominio = env.DOMINIO?.trim().replace(/\/+$/, '')
   return dominio ? `https://${dominio}/api/webhooks/ligacao` : null
+}
+
+/** Segredo compartilhado com a Vapi, para provar que um POST veio dela.
+ *
+ *  Sem isto, `/api/webhooks/ligacao` aceita qualquer requisição de qualquer
+ *  um — e um relatório forjado com `desfecho: optout` põe o número de um lead
+ *  real na supressão GLOBAL, calando todos os canais com ele. É a mesma
+ *  brecha que o webhook de SMS tinha.
+ *
+ *  Derivado do APP_SECRET em vez de ser um segredo novo: um a menos para
+ *  cadastrar, girar e esquecer. Muda junto com o APP_SECRET, e nesse caso os
+ *  agentes precisam ser publicados de novo — o que já é verdade para tudo
+ *  mais que depende dele. */
+export const segredoDoWebhookDeVoz = segredoDoWebhookVapi
+
+/** Comparação em tempo constante: comparar com === vaza, pelo tempo, quantos
+ *  bytes iniciais o atacante acertou. */
+export function conferirSegredoDeVoz(
+  recebido: string | null | undefined,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const esperado = segredoDoWebhookDeVoz(env)
+  if (!esperado || !recebido) return false
+  const a = Buffer.from(esperado)
+  const b = Buffer.from(recebido)
+  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 export interface DadosDoCliente {
@@ -219,6 +247,7 @@ export async function publicarAgente(
   agenteId: string,
   cred: CredenciaisVapi,
   webhook?: string | null,
+  segredo?: string | null,
 ): Promise<ResultadoAgente> {
   const [a] = await db.select().from(agenteVoz).where(eq(agenteVoz.id, agenteId)).limit(1)
   if (!a) return { ok: false, erro: 'agente não encontrado' }
@@ -238,6 +267,7 @@ export async function publicarAgente(
     modeloTranscritor: a.modeloTranscritor,
     idioma: a.idioma,
     webhook: webhook ?? null,
+    segredoWebhook: segredo ?? segredoDoWebhookDeVoz(),
     ajustes: a.ajustes,
   }
 

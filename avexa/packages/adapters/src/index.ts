@@ -1,3 +1,4 @@
+import { segredoDoWebhookVapi } from './vapi.ts'
 import type { AdaptadorCanal, Canal } from '@avexa/core'
 import { adaptadorSeco } from '@avexa/core'
 import { adaptadorResend, type ConfigResend } from './resend.ts'
@@ -55,11 +56,17 @@ export function adaptadoresDoAmbiente(
       ...(env.WHATSAPP_VERSAO ? { versao: env.WHATSAPP_VERSAO } : {}),
     }
   }
-  if (env.VAPI_API_KEY && env.VAPI_ASSISTANT_ID && env.VAPI_PHONE_NUMBER_ID) {
+  // Sem exigir assistente e número globais: cada cliente tem os seus, e
+  // exigir os globais deixaria a voz desligada justamente na operação
+  // multi-cliente — o mesmo defeito que o SMS tinha com TWILIO_REMETENTE.
+  if (env.VAPI_API_KEY) {
     cfg.ligacao = {
       apiKey: env.VAPI_API_KEY,
-      assistantId: env.VAPI_ASSISTANT_ID,
-      phoneNumberId: env.VAPI_PHONE_NUMBER_ID,
+      ...(env.VAPI_ASSISTANT_ID ? { assistantId: env.VAPI_ASSISTANT_ID } : {}),
+      ...(env.VAPI_PHONE_NUMBER_ID ? { phoneNumberId: env.VAPI_PHONE_NUMBER_ID } : {}),
+      // Derivado do APP_SECRET, o mesmo valor que a publicação do agente
+      // manda para a Vapi. Nunca dois segredos para manter iguais à mão.
+      ...(segredoDoWebhookVapi(env) ? { segredoWebhook: segredoDoWebhookVapi(env)! } : {}),
     }
   }
   return cfg

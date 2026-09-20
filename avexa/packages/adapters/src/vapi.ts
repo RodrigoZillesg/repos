@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type {
   AdaptadorCanal,
   EventoRecebido,
@@ -16,11 +17,78 @@ import { requisitar, type Buscar } from './http.ts'
 
 export interface ConfigVapi {
   apiKey: string
-  /** Id do assistente configurado para o cliente. */
-  assistantId: string
-  /** Id do número no Vapi, importado do Twilio. */
-  phoneNumberId: string
+  /** Segredo que a Vapi devolve em `x-vapi-secret` a cada POST.
+   *
+   *  Sem ele o endpoint aceita relatório de qualquer um — e um relatório
+   *  forjado com `desfecho: optout` põe o número de um lead real na supressão
+   *  GLOBAL, calando todos os canais com ele para sempre. */
+  segredoWebhook?: string
+  /** Assistente de reserva. O normal é o do cliente, que vem na intenção. */
+  assistantId?: string
+  /** Número de reserva na Vapi. O normal é o do cliente. */
+  phoneNumberId?: string
   buscar?: Buscar
+}
+
+/** Como cada desfecho do agente vira evento do motor.
+ *
+ *  `optout` é o que mais importa: é ele que põe a pessoa na supressão global,
+ *  em todos os canais. Por isso vem do modelo, que sabe quem disse o quê, e
+ *  não de varredura de palavra sobre a transcrição inteira — que inclui o que
+ *  o próprio agente falou. */
+const DESFECHO_PARA_EVENTO = {
+  aceitou: 'atendida',
+  recusou: 'atendida',
+  reuniao_marcada: 'atendida',
+  segmento_errado: 'atendida',
+  sem_resposta: 'nao_atendida',
+  caixa_postal: 'caixa_postal',
+  optout: 'optout',
+} as const satisfies Record<string, EventoRecebido['tipo']>
+
+type Desfecho = keyof typeof DESFECHO_PARA_EVENTO
+
+function analise(m: Record<string, unknown>): Record<string, unknown> {
+  const a = (m.analysis ?? {}) as Record<string, unknown>
+  return (a.structuredData ?? {}) as Record<string, unknown>
+}
+
+/** O desfecho, só se for um dos que pedimos. Valor fora da lista é ruído do
+ *  modelo, e tratá-lo como desconhecido é melhor que adivinhar. */
+function lerDesfecho(m: Record<string, unknown>): Desfecho | null {
+  const v = analise(m).desfecho
+  return typeof v === 'string' && v in DESFECHO_PARA_EVENTO ? (v as Desfecho) : null
+}
+
+function lerTexto(m: Record<string, unknown>, chave: string): string | null {
+  const v = analise(m)[chave]
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+/** O segredo compartilhado com a Vapi, derivado do APP_SECRET.
+ *
+ *  Derivado em vez de ser um segredo novo: um a menos para cadastrar, girar e
+ *  esquecer. Vive aqui, e não em @avexa/servicos, porque quem publica o agente
+ *  e quem confere o webhook precisam chegar ao MESMO valor — e derivar a mesma
+ *  coisa em dois lugares é como se elas param de bater sem ninguém notar. */
+export function segredoDoWebhookVapi(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const base = env.APP_SECRET
+  if (!base || base.length < 32) return null
+  return createHmac('sha256', base).update('vapi:webhook:v1').digest('hex')
+}
+
+/** Comparação em tempo constante. Comparar com === vaza, pelo tempo, quantos
+ *  bytes iniciais o atacante acertou. */
+function conferirSegredoVapi(recebido?: string, esperado?: string): boolean {
+  // Sem segredo configurado nada é aceito: é o estado de um agente publicado
+  // antes desta checagem existir, e aceitar seria manter a brecha aberta
+  // justamente onde ninguém olharia.
+  if (!esperado || !recebido) return false
+  const a = Buffer.from(esperado)
+  const b = Buffer.from(recebido)
+  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 const AVISO_GRAVACAO =
@@ -32,11 +100,25 @@ export function adaptadorVapi(cfg: ConfigVapi): AdaptadorCanal {
     provedor: 'vapi',
 
     async enviar(i: IntencaoContato): Promise<ResultadoEnvio> {
+      const assistente = (i.opcoes?.assistantId as string) ?? cfg.assistantId
+      const numeroId = (i.opcoes?.phoneNumberId as string) ?? cfg.phoneNumberId
+      if (!assistente || !numeroId) {
+        // A Vapi devolveria um 400 obscuro. Melhor dizer o que falta, e não
+        // insistir: nenhuma retentativa cria um agente.
+        return {
+          ok: false,
+          erro: !assistente
+            ? 'sem agente de voz: este cliente não tem agente publicado na Vapi'
+            : 'sem número na Vapi: o número do cliente ainda não foi importado',
+          reenviavel: false,
+        }
+      }
+
       const r = await requisitar('https://api.vapi.ai/call', {
         cabecalhos: { authorization: `Bearer ${cfg.apiKey}` },
         corpo: {
-          assistantId: (i.opcoes?.assistantId as string) ?? cfg.assistantId,
-          phoneNumberId: (i.opcoes?.phoneNumberId as string) ?? cfg.phoneNumberId,
+          assistantId: assistente,
+          phoneNumberId: numeroId,
           customer: { number: i.destinatario },
           assistantOverrides: {
             // O aviso vai na primeira fala, não numa configuração que alguém
@@ -59,7 +141,11 @@ export function adaptadorVapi(cfg: ConfigVapi): AdaptadorCanal {
       return { ok: true, ...(id ? { provedorId: id } : {}) }
     },
 
-    interpretarWebhook(corpo: unknown): EventoRecebido[] {
+    interpretarWebhook(corpo: unknown, cabecalhos: Record<string, string>): EventoRecebido[] {
+      // Antes de olhar o conteúdo: veio mesmo da Vapi? O relatório decide
+      // supressão global, e supressão forjada é definitiva na prática.
+      if (!conferirSegredoVapi(cabecalhos['x-vapi-secret'], cfg.segredoWebhook)) return []
+
       const m = (corpo as { message?: Record<string, unknown> } | null)?.message
       if (!m || m.type !== 'end-of-call-report') return []
 
@@ -71,17 +157,28 @@ export function adaptadorVapi(cfg: ConfigVapi): AdaptadorCanal {
       const motivo = String(m.endedReason ?? '')
 
       // O Vapi descreve o fim da chamada em texto; estas são as famílias que
-      // importam para o motor.
+      // importam para o motor. Vêm primeiro porque são verdade mecânica: se
+      // ninguém atendeu, não há conversa sobre a qual opinar.
       const naoAtendeu = /no-answer|busy|customer-did-not-answer|twilio-failed/i.test(motivo)
       const caixaPostal = /voicemail/i.test(motivo)
+
+      const desfecho = lerDesfecho(m)
 
       const tipo: EventoRecebido['tipo'] = caixaPostal
         ? 'caixa_postal'
         : naoAtendeu
           ? 'nao_atendida'
-          : ehPedidoDeParada(transcricao)
-            ? 'optout'
-            : 'atendida'
+          : desfecho
+            ? DESFECHO_PARA_EVENTO[desfecho]
+            : // Só quando o agente não devolveu desfecho estruturado — agente
+              // antigo, ou análise que falhou. A heurística foi feita para SMS
+              // de três palavras; sobre a transcrição inteira de uma conversa
+              // ela erra para o lado perigoso. "não quero mais falar disso
+              // agora, me liga semana que vem" vira opt-out global, e o lead
+              // que pediu retorno nunca mais é contatado por canal nenhum.
+              ehPedidoDeParada(transcricao)
+              ? 'optout'
+              : 'atendida'
 
       return [
         {
@@ -95,6 +192,11 @@ export function adaptadorVapi(cfg: ConfigVapi): AdaptadorCanal {
             duracaoSegundos: Number(m.durationSeconds ?? 0),
             gravacaoUrl: m.recordingUrl ?? null,
             resumo: m.summary ?? null,
+            desfecho: desfecho ?? null,
+            // Quando o desfecho veio do modelo, o motivo dele vale mais que
+            // qualquer inferência nossa sobre a transcrição.
+            desfechoMotivo: lerTexto(m, 'motivo'),
+            emailConfirmado: lerTexto(m, 'emailConfirmado'),
           },
         },
       ]
@@ -138,6 +240,9 @@ export interface AssistenteVapi {
    *  Sem isto os eventos não chegam ao Avexa, e o opt-out dito em voz alta
    *  não entra na supressão global. */
   webhook?: string | null
+  /** Segredo que a Vapi devolve no cabeçalho a cada POST. Sem ele o endpoint
+   *  aceitaria um relatório forjado — e desfecho forjado vira supressão. */
+  segredoWebhook?: string | null
   ajustes?: Record<string, unknown>
 }
 
@@ -208,7 +313,15 @@ function corpoDoAssistente(a: AssistenteVapi): Record<string, unknown> {
         },
       },
     },
-    ...(a.webhook ? { server: { url: a.webhook, timeoutSeconds: 20 } } : {}),
+    ...(a.webhook
+      ? {
+          server: {
+            url: a.webhook,
+            timeoutSeconds: 20,
+            ...(a.segredoWebhook ? { secret: a.segredoWebhook } : {}),
+          },
+        }
+      : {}),
     ...(a.ajustes ?? {}),
   }
 }

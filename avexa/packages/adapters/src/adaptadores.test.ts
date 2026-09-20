@@ -164,7 +164,10 @@ test('Vapi anuncia a gravação na primeira fala, não numa configuração', asy
 })
 
 test('Vapi separa não atendida, caixa postal e chamada atendida', () => {
-  const a = adaptadorVapi({ apiKey: 'k', assistantId: 'a', phoneNumberId: 'p' })
+  // O segredo é obrigatório desde que o relatório passou a decidir supressão
+  // global: sem ele, um POST forjado calaria um lead em todos os canais.
+  const SEGREDO = 'segredo-compartilhado'
+  const a = adaptadorVapi({ apiKey: 'k', assistantId: 'a', phoneNumberId: 'p', segredoWebhook: SEGREDO })
   const ler = (endedReason: string, transcript = '') =>
     (a.interpretarWebhook!(
       {
@@ -176,7 +179,7 @@ test('Vapi separa não atendida, caixa postal e chamada atendida', () => {
           call: { id: 'call_1', customer: { number: '+61412345678' } },
         },
       },
-      {},
+      { 'x-vapi-secret': SEGREDO },
     ) as any)[0]
 
   assert.equal(ler('customer-did-not-answer').tipo, 'nao_atendida')

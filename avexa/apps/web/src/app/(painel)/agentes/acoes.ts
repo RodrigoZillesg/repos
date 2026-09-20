@@ -8,6 +8,7 @@ import {
   credenciaisVapiDoAmbiente,
   importarNumeroDoCliente,
   publicarAgente,
+  segredoDoWebhookDeVoz,
   webhookDeLigacao,
 } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
@@ -125,7 +126,7 @@ export async function publicar(agenteId: string): Promise<Resultado> {
   const vapi = credenciaisVapiDoAmbiente()
   if (!vapi) return { ok: false, erro: 'VAPI_API_KEY não está configurada no servidor' }
 
-  const r = await publicarAgente(db(), agenteId, vapi, webhookDeLigacao())
+  const r = await publicarAgente(db(), agenteId, vapi, webhookDeLigacao(), segredoDoWebhookDeVoz())
   if (!r.ok) return { ok: false, erro: r.erro }
 
   await db().insert(auditoria).values({
