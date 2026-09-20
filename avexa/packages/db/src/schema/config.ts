@@ -32,6 +32,20 @@ export const configGlobal = pgTable('config_global', {
   /** Retenção, em dias. Zero desliga o expurgo. */
   retencaoLeadDias: integer().notNull().default(0),
   retencaoGravacaoDias: integer().notNull().default(0),
+  /** Padrões do agente de voz para cliente novo.
+   *
+   *  Ficam aqui, e não fixos no código, porque provedor aposenta modelo sem
+   *  avisar — o gemini-2.5-flash morreu embaixo da gente hoje. Cada cliente
+   *  nasce com estes valores e pode divergir depois; mudar aqui não mexe em
+   *  quem já existe, de propósito: ninguém quer que um ajuste de padrão
+   *  reescreva o agente de um cliente em produção. */
+  vozModeloProvedor: text().notNull().default('openai'),
+  vozModelo: text().notNull().default('gpt-5.6-terra'),
+  vozProvedorVoz: text().notNull().default('11labs'),
+  vozVozId: text().notNull().default('sarah'),
+  vozModeloVoz: text().notNull().default('eleven_multilingual_v2'),
+  vozTranscritor: text().notNull().default('deepgram'),
+  vozModeloTranscritor: text().notNull().default('nova-3'),
   atualizadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   atualizadoPor: uuid().references(() => usuario.id, { onDelete: 'set null' }),
 })
@@ -72,4 +86,63 @@ export const auditoria = pgTable(
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('auditoria_entidade_idx').on(t.entidade, t.entidadeId, t.criadoEm)],
+)
+
+/** O agente de voz de um cliente na Vapi.
+ *
+ *  Cada cliente tem o seu, criado a partir do esqueleto da Avexa e livre para
+ *  divergir — é assim que a conta já opera hoje (TALOGY Path A e B são cópias
+ *  que seguiram caminhos diferentes), e é o que permite ajustar um cliente sem
+ *  arriscar os outros.
+ *
+ *  Guardamos a configuração AQUI e espelhamos na Vapi. O inverso — tratar a
+ *  Vapi como fonte da verdade — deixaria o painel exibindo o que acha que
+ *  configurou em vez do que está no ar, e tornaria impossível saber quem mudou
+ *  o quê. */
+export const agenteVoz = pgTable(
+  'agente_voz',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    clienteId: uuid()
+      .notNull()
+      .references(() => cliente.id, { onDelete: 'cascade' }),
+    /** Id do assistente na Vapi. Nulo enquanto ainda não foi publicado lá. */
+    vapiAssistantId: text(),
+    nome: text().notNull(),
+    /** Idioma da conversa. Decide o transcritor e a voz; hoje a conta resolve
+     *  isso duplicando agente, e aqui vira campo. */
+    idioma: text().notNull().default('en'),
+
+    /** Cérebro. Começa no padrão global e pode divergir por cliente. */
+    modeloProvedor: text().notNull(),
+    modelo: text().notNull(),
+    /** O prompt de sistema inteiro. É o que mais muda e o que mais importa. */
+    prompt: text().notNull(),
+    /** Primeira fala. Sai da mesma fonte do prompt: no agente que inspecionamos
+     *  os dois divergiam, e um deles se dizia obrigatório e imutável. */
+    primeiraMensagem: text().notNull(),
+    mensagemEncerramento: text().notNull().default('Have a great day!'),
+    mensagemCaixaPostal: text(),
+
+    provedorVoz: text().notNull(),
+    vozId: text().notNull(),
+    modeloVoz: text(),
+    transcritor: text().notNull(),
+    modeloTranscritor: text(),
+
+    /** Ajustes finos que não merecem coluna própria: estabilidade da voz,
+     *  som de fundo, planos de silêncio. */
+    ajustes: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+
+    /** Quando a configuração daqui foi espelhada na Vapi. Nulo ou mais antigo
+     *  que `atualizadoEm` significa que há mudança não publicada. */
+    publicadoEm: timestamp({ withTimezone: true }),
+    atualizadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    atualizadoPor: uuid().references(() => usuario.id, { onDelete: 'set null' }),
+    criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('agente_voz_cliente_idx').on(t.clienteId),
+    index('agente_voz_vapi_idx').on(t.vapiAssistantId),
+  ],
 )
