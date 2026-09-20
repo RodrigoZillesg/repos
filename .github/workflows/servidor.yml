@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, vapi, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -463,6 +463,19 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker vapi '${{ inputs.id }}'"
+
+      # Reenvia para a Vapi os agentes que já estão no ar.
+      #
+      # Necessário depois de o webhook de desfecho passar a exigir segredo: um
+      # agente publicado antes disso manda o relatório sem `x-vapi-secret`, a
+      # Avexa descarta, e a ligação acontece sem virar evento nenhum — o lead
+      # conversa e o fluxo fica parado esperando um desfecho que já veio.
+      - name: Republicar os agentes
+        if: inputs.acao == 'publicar-agentes'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker publicar-agentes"
 
       # Link mágico de entrada no painel. Enquanto o Resend não estiver
       # configurado, é assim que se entra: o link não tem como sair por e-mail.
