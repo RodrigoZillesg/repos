@@ -12,7 +12,7 @@ import {
   Webhook,
 } from 'lucide-react'
 import type { ProvedorAgenda } from '@avexa/core'
-import { podeAgendar, type AgendaDoGoogle } from '@avexa/adapters'
+import { podeAgendar, type AgendaDoGoogle, type PipelineHubspot } from '@avexa/adapters'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
@@ -44,6 +44,12 @@ export interface EstadoCliente {
     statusDisponiveis: Array<{ valor: string; rotulo: string }>
     statusQualificado: string | null
     statusNaoQualificado: string | null
+    /** Falso num portal conectado antes de a Avexa pedir acesso a negócios. */
+    negociosOk: boolean
+    pipeline: string | null
+    pipelineNome: string | null
+    estagioQualificado: string | null
+    estagioNaoQualificado: string | null
   }
   webhook: { url: string | null; temSegredo: boolean }
   emailTime: { para: string | null }
@@ -76,6 +82,18 @@ interface Props {
   ) => Promise<{ tipos: Array<{ uri: string; nome: string; duracaoMin: number }> } | { erro: string }>
   aoEscolherProvedor: (c: string, p: ProvedorAgenda) => Promise<{ ok: boolean }>
   aoSalvarStatusHubspot: (c: string, qualificado: string, naoQualificado: string) => Promise<{ ok: boolean }>
+  aoBuscarPipelines: (c: string) => Promise<{ pipelines: PipelineHubspot[] } | { erro: string }>
+  aoSalvarFunilHubspot: (
+    c: string,
+    pipeline: string,
+    estagioQualificado: string,
+    estagioNaoQualificado: string,
+    nome: string,
+  ) => Promise<{ ok: boolean }>
+  aoCriarPipeline: (
+    c: string,
+    nome: string,
+  ) => Promise<{ ok: true; pipeline: PipelineHubspot } | { ok: false; erro: string }>
   aoSalvarWebhook: (
     c: string,
     url: string,
@@ -266,6 +284,193 @@ function EscolhaDeAgendas({
   )
 }
 
+/** Para onde o lead vai no funil do cliente.
+ *
+ *  Pipeline e estágio são ids internos do portal — nada que alguém saiba de
+ *  cabeça —, então a lista vem do HubSpot e o operador escolhe. Estágio em
+ *  branco quer dizer "não abrir negócio", que é a resposta certa para o cliente
+ *  que não quer lead frio poluindo a previsão de vendas dele. */
+function FunilHubspot({
+  negociosOk,
+  pipelineSalvo,
+  nomeSalvo,
+  pipelines,
+  pipeline,
+  estagioQual,
+  estagioNao,
+  nomeNovo,
+  podeEditar,
+  ocupado,
+  aoTrocarPipeline,
+  aoTrocarQual,
+  aoTrocarNao,
+  aoTrocarNomeNovo,
+  aoCarregar,
+  aoCriar,
+  aoSalvar,
+}: {
+  clienteId: string
+  negociosOk: boolean
+  pipelineSalvo: string | null
+  nomeSalvo: string | null
+  pipelines: PipelineHubspot[] | null
+  pipeline: string
+  estagioQual: string
+  estagioNao: string
+  nomeNovo: string
+  podeEditar: boolean
+  ocupado: boolean
+  aoTrocarPipeline: (v: string) => void
+  aoTrocarQual: (v: string) => void
+  aoTrocarNao: (v: string) => void
+  aoTrocarNomeNovo: (v: string) => void
+  aoCarregar: () => void
+  aoCriar: () => void
+  aoSalvar: () => void
+}) {
+  const escolhido = pipelines?.find((x) => x.id === pipeline) ?? null
+  // Estágio de fechamento recebe negócio já ganho ou perdido. Um lead que
+  // acabou de entrar não é nem um nem outro, então eles ficam de fora.
+  const estagios = (escolhido?.estagios ?? []).filter((x) => !x.fechado)
+
+  if (!negociosOk) {
+    return (
+      <p className="mt-4 flex items-start gap-2 text-xs text-[var(--color-alerta)]">
+        <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+        Este portal foi conectado antes de a Avexa pedir acesso a negócios. Desconecte e conecte de
+        novo para escolher pipeline — o consentimento novo pede permissões sobre negócios e sobre a
+        estrutura deles, que é o que permite criar um pipeline daqui.
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-[13px] font-semibold">Funil de negócios</h4>
+        {pipelineSalvo ? (
+          <Selo tom="ok">{nomeSalvo ?? pipelineSalvo}</Selo>
+        ) : (
+          <Selo>sem negócio — só contato e nota</Selo>
+        )}
+      </div>
+      <Ajuda>
+        Com um pipeline escolhido, cada lead entregue abre um negócio nele e é atualizado depois,
+        nunca duplicado. Sem pipeline, a entrega segue como sempre: contato, nota e reunião.
+      </Ajuda>
+
+      <div className="mt-3 flex gap-2">
+        <Selecao
+          id="hs-pipe"
+          value={pipeline}
+          disabled={!podeEditar}
+          onChange={(ev) => aoTrocarPipeline(ev.target.value)}
+        >
+          <option value="">— não abrir negócio —</option>
+          {(pipelines ?? []).map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.rotulo}
+            </option>
+          ))}
+          {/* O que já estava salvo, antes de a lista ser carregada: sem isto o
+              select viria vazio e um Salvar desligaria o funil sem querer. */}
+          {pipeline && !(pipelines ?? []).some((x) => x.id === pipeline) && (
+            <option value={pipeline}>{nomeSalvo ?? pipeline}</option>
+          )}
+        </Selecao>
+        <Botao
+          variante="contorno"
+          tamanho="pequeno"
+          disabled={!podeEditar || ocupado}
+          onClick={aoCarregar}
+        >
+          {pipelines === null ? 'Carregar do HubSpot' : 'Recarregar'}
+        </Botao>
+      </div>
+
+      {pipeline && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <Rotulo htmlFor="hs-eq">Estágio quando qualificado</Rotulo>
+            <Selecao
+              id="hs-eq"
+              value={estagioQual}
+              disabled={!podeEditar || estagios.length === 0}
+              onChange={(ev) => aoTrocarQual(ev.target.value)}
+            >
+              <option value="">— não abrir negócio —</option>
+              {estagios.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.rotulo}
+                </option>
+              ))}
+              {estagioQual && !estagios.some((x) => x.id === estagioQual) && (
+                <option value={estagioQual}>{estagioQual}</option>
+              )}
+            </Selecao>
+          </div>
+          <div>
+            <Rotulo htmlFor="hs-en">Estágio quando não qualificado</Rotulo>
+            <Selecao
+              id="hs-en"
+              value={estagioNao}
+              disabled={!podeEditar || estagios.length === 0}
+              onChange={(ev) => aoTrocarNao(ev.target.value)}
+            >
+              <option value="">— não abrir negócio —</option>
+              {estagios.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.rotulo}
+                </option>
+              ))}
+              {estagioNao && !estagios.some((x) => x.id === estagioNao) && (
+                <option value={estagioNao}>{estagioNao}</option>
+              )}
+            </Selecao>
+          </div>
+          {estagios.length === 0 && (
+            <p className="sm:col-span-2">
+              <Ajuda>Carregue a lista do HubSpot para ver os estágios deste pipeline.</Ajuda>
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3">
+        <Rotulo htmlFor="hs-novo">Criar um pipeline novo no portal do cliente</Rotulo>
+        <div className="flex gap-2">
+          <Entrada
+            id="hs-novo"
+            value={nomeNovo}
+            disabled={!podeEditar}
+            onChange={(ev) => aoTrocarNomeNovo(ev.target.value)}
+            placeholder="Leads Avexa"
+          />
+          <Botao
+            variante="contorno"
+            tamanho="pequeno"
+            disabled={!podeEditar || ocupado || !nomeNovo.trim()}
+            onClick={aoCriar}
+          >
+            Criar
+          </Botao>
+        </div>
+        <Ajuda>
+          Cria de verdade, no CRM do cliente, com os estágios de um funil de lead de saída
+          (qualificado, reunião, proposta, ganho, perdido). Ele fica lá mesmo depois — só o cliente
+          pode apagar. Fica registrado em auditoria quem pediu.
+        </Ajuda>
+      </div>
+
+      <div className="mt-3">
+        <Botao tamanho="pequeno" disabled={!podeEditar || ocupado} onClick={aoSalvar}>
+          Salvar funil
+        </Botao>
+      </div>
+    </div>
+  )
+}
+
 export function Integracoes(p: Props) {
   const { estado: e } = p
   const [aviso, setAviso] = useState<string | null>(null)
@@ -281,6 +486,11 @@ export function Integracoes(p: Props) {
   const [tipoEscolhido, setTipoEscolhido] = useState(e.calendly.tipoDeEvento ?? '')
   const [statusQual, setStatusQual] = useState(e.hubspot.statusQualificado ?? '')
   const [statusNao, setStatusNao] = useState(e.hubspot.statusNaoQualificado ?? '')
+  const [pipelines, setPipelines] = useState<PipelineHubspot[] | null>(null)
+  const [pipeline, setPipeline] = useState(e.hubspot.pipeline ?? '')
+  const [estagioQual, setEstagioQual] = useState(e.hubspot.estagioQualificado ?? '')
+  const [estagioNao, setEstagioNao] = useState(e.hubspot.estagioNaoQualificado ?? '')
+  const [nomePipelineNovo, setNomePipelineNovo] = useState('')
   const [urlWebhook, setUrlWebhook] = useState(e.webhook.url ?? '')
   const [segredoNovo, setSegredoNovo] = useState<string | null>(null)
   const [emailTime, setEmailTime] = useState(e.emailTime.para ?? '')
@@ -684,6 +894,65 @@ export function Integracoes(p: Props) {
               As opções vêm do portal do cliente, não de uma lista nossa: cada empresa renomeia esse
               campo, e mandar um valor que o portal não tem derruba a entrega inteira.
             </Ajuda>
+
+            <FunilHubspot
+              clienteId={e.clienteId}
+              negociosOk={e.hubspot.negociosOk}
+              pipelineSalvo={e.hubspot.pipeline}
+              nomeSalvo={e.hubspot.pipelineNome}
+              pipelines={pipelines}
+              pipeline={pipeline}
+              estagioQual={estagioQual}
+              estagioNao={estagioNao}
+              nomeNovo={nomePipelineNovo}
+              podeEditar={p.podeAdministrar}
+              ocupado={pendente}
+              aoTrocarPipeline={(v) => {
+                setPipeline(v)
+                // Estágio é filho do pipeline: manter o de antes apontaria para
+                // um estágio de outro funil, e o HubSpot recusaria a entrega.
+                setEstagioQual('')
+                setEstagioNao('')
+              }}
+              aoTrocarQual={setEstagioQual}
+              aoTrocarNao={setEstagioNao}
+              aoTrocarNomeNovo={setNomePipelineNovo}
+              aoCarregar={() =>
+                iniciar(async () => {
+                  const r = await p.aoBuscarPipelines(e.clienteId)
+                  if ('erro' in r) setAviso(r.erro)
+                  else {
+                    setPipelines(r.pipelines)
+                    setAviso(`${r.pipelines.length} pipeline(s) neste portal.`)
+                  }
+                })
+              }
+              aoCriar={() =>
+                iniciar(async () => {
+                  const r = await p.aoCriarPipeline(e.clienteId, nomePipelineNovo.trim())
+                  if (!r.ok) return setAviso(r.erro)
+                  setPipelines((x) => [...(x ?? []), r.pipeline])
+                  setPipeline(r.pipeline.id)
+                  setEstagioQual(r.pipeline.estagios[0]?.id ?? '')
+                  setEstagioNao('')
+                  setNomePipelineNovo('')
+                  setAviso(`Pipeline "${r.pipeline.rotulo}" criado no portal do cliente.`)
+                })
+              }
+              aoSalvar={() =>
+                rodar(
+                  () =>
+                    p.aoSalvarFunilHubspot(
+                      e.clienteId,
+                      pipeline,
+                      estagioQual,
+                      estagioNao,
+                      pipelines?.find((x) => x.id === pipeline)?.rotulo ?? e.hubspot.pipelineNome ?? '',
+                    ),
+                  'Salvo.',
+                )
+              }
+            />
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Botao

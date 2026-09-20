@@ -4,12 +4,13 @@ import { entrega, integracao, lead as tLead, reuniao, type Db, type Lead } from 
 import {
   criarNota,
   salvarContato,
+  salvarNegocio,
   salvarReuniaoHubspot,
   type ContatoHubspot,
   type DesfechoReuniao,
 } from '@avexa/adapters'
 import { cifrar, decifrar } from './cripto.ts'
-import { conexaoHubspot, statusParaGravar } from './hubspot.ts'
+import { conexaoHubspot, funilParaGravar, statusParaGravar } from './hubspot.ts'
 
 /** Entrega do lead onde o cliente trabalha.
  *
@@ -26,6 +27,8 @@ export type DestinoEntrega =
   | 'hubspot'
   /** A reunião no CRM: entra e sai do ar sozinha, depois da entrega do lead. */
   | 'hubspot_reuniao'
+  /** O negócio no funil do cliente, quando ele configurou pipeline e estágio. */
+  | 'hubspot_negocio'
   | 'email_time'
   | 'google_sheets'
   | 'webhook'
@@ -326,22 +329,77 @@ export async function enviarReuniaoAoCrm(
   return { ok: true, externoId: salva.id }
 }
 
-/** O id do contato no CRM vem do registro da entrega que deu certo: é o único
+/** O id de um objeto do CRM vem do registro da entrega que deu certo: é o único
  *  lugar onde ele existe do nosso lado. */
-async function contatoNoCrm(db: Db, leadId: string): Promise<string | null> {
+async function objetoNoCrm(db: Db, leadId: string, destino: string): Promise<string | null> {
   const [linha] = await db
     .select({ externoId: entrega.externoId })
     .from(entrega)
     .where(
       and(
         eq(entrega.leadId, leadId),
-        eq(entrega.destino, 'hubspot'),
+        eq(entrega.destino, destino),
         eq(entrega.estado, 'entregue'),
       ),
     )
     .orderBy(desc(entrega.criadoEm))
     .limit(1)
   return linha?.externoId ?? null
+}
+
+const contatoNoCrm = (db: Db, leadId: string) => objetoNoCrm(db, leadId, 'hubspot')
+
+/** Abre ou atualiza o negócio do lead no funil escolhido pelo cliente.
+ *
+ *  Só roda quando há pipeline e estágio configurados. Sem isso a entrega fica
+ *  como sempre foi — contato e nota — em vez de adivinhar um funil: negócio no
+ *  pipeline errado suja a previsão de vendas do cliente, que é o número que
+ *  ele olha toda segunda. */
+async function enviarNegocioAoCrm(
+  db: Db,
+  ld: Lead,
+  contatoId: string,
+  accessToken: string,
+  config: Record<string, unknown>,
+  qualificado: boolean,
+): Promise<{ ok: true; pulado?: boolean; externoId?: string } | { ok: false; erro: string }> {
+  const destino = funilParaGravar(config, qualificado)
+  if (!destino) return { ok: true, pulado: true }
+
+  const existente = await objetoNoCrm(db, ld.id, 'hubspot_negocio')
+  const salvo = await salvarNegocio(
+    accessToken,
+    contatoId,
+    {
+      nome: ld.nome ?? ld.email ?? ld.telefone ?? 'Lead da Avexa',
+      pipeline: destino.pipeline,
+      estagio: destino.estagio,
+    },
+    existente ?? undefined,
+  )
+
+  if (!salvo.ok) {
+    await registrarEntrega(db, {
+      leadId: ld.id,
+      clienteId: ld.clienteId,
+      destino: 'hubspot_negocio',
+      estado: 'falhou',
+      externoId: contatoId,
+      erro: salvo.semPermissao
+        ? `o app não tem permissão de criar negócio neste portal: ${salvo.erro}`
+        : salvo.erro,
+    })
+    return { ok: false, erro: salvo.erro }
+  }
+
+  await registrarEntrega(db, {
+    leadId: ld.id,
+    clienteId: ld.clienteId,
+    destino: 'hubspot_negocio',
+    estado: 'entregue',
+    externoId: salvo.id,
+  })
+  return { ok: true, externoId: salvo.id }
 }
 
 /** Grava o lead no CRM do cliente: contato com upsert e a conversa como nota. */
@@ -397,6 +455,22 @@ export async function entregarNoHubspot(
         ? 'O contato foi gravado, mas o app não tem permissão de criar notas neste portal.'
         : `O contato foi gravado, mas a nota falhou: ${nota.erro}`
     }
+  }
+
+  // O negócio abre o lead no funil do cliente. Falhar aqui não desfaz o
+  // contato: ele já está gravado, e é o que o vendedor precisa para trabalhar.
+  const negocio = await enviarNegocioAoCrm(
+    db,
+    ld,
+    r.id,
+    conexao.accessToken,
+    conexao.config as Record<string, unknown>,
+    qualificado,
+  )
+  if (!negocio.ok) {
+    aviso = [aviso, `O contato foi gravado, mas o negócio não abriu: ${negocio.erro}`]
+      .filter(Boolean)
+      .join(' ')
   }
 
   // A reunião vai junto: o vendedor abre o contato e vê o compromisso, não uma

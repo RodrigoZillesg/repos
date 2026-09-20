@@ -9,11 +9,14 @@ import { Cartao, Selo } from '@/componentes/ui/cartao'
 import { Integracoes, type EstadoCliente } from '@/componentes/integracoes'
 import {
   buscarAgendas,
+  buscarPipelines,
   buscarTiposDeEvento,
+  criarPipeline,
   desligar,
   escolherProvedorAgenda,
   salvarAgendas,
   salvarEmailTime,
+  salvarFunilHubspot,
   salvarPlanilha,
   salvarStatusHubspot,
   salvarTipoDeEvento,
@@ -89,6 +92,14 @@ export default async function PaginaIntegracoes({
         [],
       statusQualificado: (cfg('hubspot').statusQualificado as string | undefined) ?? null,
       statusNaoQualificado: (cfg('hubspot').statusNaoQualificado as string | undefined) ?? null,
+      // Ausente quer dizer conexão antiga, de antes de guardarmos os escopos.
+      // Tratamos como "sem negócios": oferecer e levar 403 é pior do que
+      // dizer que falta reconectar.
+      negociosOk: cfg('hubspot').negociosOk === true,
+      pipeline: (cfg('hubspot').pipeline as string | undefined) ?? null,
+      pipelineNome: (cfg('hubspot').pipelineNome as string | undefined) ?? null,
+      estagioQualificado: (cfg('hubspot').estagioQualificado as string | undefined) ?? null,
+      estagioNaoQualificado: (cfg('hubspot').estagioNaoQualificado as string | undefined) ?? null,
     },
     webhook: {
       url: (cfg('webhook').url as string | undefined) ?? null,
@@ -157,6 +168,9 @@ export default async function PaginaIntegracoes({
           aoBuscarTipos={buscarTiposDeEvento}
           aoEscolherProvedor={escolherProvedorAgenda}
           aoSalvarStatusHubspot={salvarStatusHubspot}
+          aoBuscarPipelines={buscarPipelines}
+          aoSalvarFunilHubspot={salvarFunilHubspot}
+          aoCriarPipeline={criarPipeline}
           aoSalvarWebhook={salvarWebhook}
           aoTestarWebhook={testarWebhook}
           aoSalvarEmailTime={salvarEmailTime}

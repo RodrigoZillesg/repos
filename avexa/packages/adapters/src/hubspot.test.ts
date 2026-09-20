@@ -1,9 +1,14 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
+  ESCOPOS_HUBSPOT,
   criarNota,
+  criarPipeline,
   garantirPropriedades,
+  listarPipelines,
   salvarContato,
+  salvarNegocio,
+  temEscoposDeNegocios,
   salvarReuniaoHubspot,
   statusDeLead,
   trocarCodigoHubspot,
@@ -51,8 +56,23 @@ test('a URL de consentimento pede só os escopos que usamos', () => {
   assert.equal(u.searchParams.get('state'), 'estado')
   const escopos = (u.searchParams.get('scope') ?? '').split(' ')
   assert.ok(escopos.includes('crm.objects.contacts.write'))
-  // Nada de escopo amplo de CRM: seria acesso à base comercial inteira.
-  assert.ok(!escopos.some((e) => e === 'crm.objects.deals.write' || e === 'content'))
+  // Negócios entraram por decisão: é o que permite escolher pipeline e criar
+  // um a partir da Avexa. O esquema junto, porque criar pipeline é escrita
+  // estrutural — e pedir depois custaria um reconsentimento de todo cliente.
+  assert.ok(escopos.includes('crm.objects.deals.write'))
+  assert.ok(escopos.includes('crm.schemas.deals.write'))
+  // O que continua fora: nada que dê a base comercial inteira ou o site.
+  for (const proibido of ['content', 'crm.objects.companies.write', 'crm.export', 'automation']) {
+    assert.ok(!escopos.includes(proibido), `não pedimos ${proibido}`)
+  }
+})
+
+test('portal conectado antes dos negócios é reconhecido, não recebe 403 calado', () => {
+  // O token antigo continua válido para contato e nota. Sem esta checagem a
+  // tela ofereceria escolher pipeline e o operador levaria um erro cru.
+  assert.equal(temEscoposDeNegocios(['crm.objects.contacts.write']), false)
+  assert.equal(temEscoposDeNegocios(ESCOPOS_HUBSPOT), true)
+  assert.equal(temEscoposDeNegocios(undefined), false)
 })
 
 test('o token é trocado por formulário, como o HubSpot exige', async () => {
@@ -268,4 +288,96 @@ test('403 na reunião é falta de escopo, e não é reenviável', async () => {
   assert.equal(r.ok, false)
   assert.equal(r.ok === false && r.semPermissao, true)
   assert.equal(r.ok === false && r.reenviavel, false)
+})
+
+/* ------------------------- Pipelines e negócios --------------------------- */
+
+const PIPELINES = {
+  results: [
+    {
+      id: 'default',
+      label: 'Vendas',
+      displayOrder: 0,
+      stages: [
+        { id: 's3', label: 'Ganho', displayOrder: 2, metadata: { isClosed: 'true' } },
+        { id: 's1', label: 'Novo', displayOrder: 0, metadata: { isClosed: 'false' } },
+        { id: 's2', label: 'Reunião', displayOrder: 1, metadata: { isClosed: 'false' } },
+      ],
+    },
+  ],
+}
+
+test('os estágios voltam na ordem de exibição do portal, não na da resposta', async () => {
+  const f = fetchFalso([[/pipelines\/deals/, { corpo: PIPELINES, metodo: 'GET' }]])
+  const r = await listarPipelines('at', f.buscar)
+  assert.ok(Array.isArray(r))
+  assert.deepEqual(r[0]!.estagios.map((e) => e.id), ['s1', 's2', 's3'])
+})
+
+test('"isClosed" vem como string do HubSpot, e precisa ser lido como booleano', () => {
+  // Comparar com `true` daria sempre falso, e o estágio de Ganho passaria por
+  // estágio comum — um lead novo entraria no funil já fechado.
+  const f = fetchFalso([[/pipelines\/deals/, { corpo: PIPELINES, metodo: 'GET' }]])
+  return listarPipelines('at', f.buscar).then((r) => {
+    assert.ok(Array.isArray(r))
+    const ganho = r[0]!.estagios.find((e) => e.id === 's3')!
+    assert.equal(ganho.fechado, true)
+    assert.equal(r[0]!.estagios.find((e) => e.id === 's1')!.fechado, false)
+  })
+})
+
+test('403 ao listar pipelines é falta de escopo, e fica dito assim', async () => {
+  const f = fetchFalso([[/pipelines\/deals/, { status: 403, metodo: 'GET' }]])
+  const r = await listarPipelines('at', f.buscar)
+  assert.ok('erro' in r)
+  assert.equal(r.semPermissao, true)
+})
+
+test('pipeline sem estágio não é criado: não receberia negócio nenhum', async () => {
+  const f = fetchFalso([])
+  const r = await criarPipeline('at', 'Vazio', [], f.buscar)
+  assert.ok('erro' in r)
+  assert.equal(f.chamadas.length, 0)
+})
+
+test('o pipeline novo vai com os metadados que o HubSpot exige, como string', async () => {
+  const f = fetchFalso([
+    [/pipelines\/deals/, { corpo: { id: 'p9', label: 'Leads Avexa', stages: [] }, metodo: 'POST' }],
+  ])
+  await criarPipeline('at', 'Leads Avexa', [{ rotulo: 'Ganho', probabilidade: 1, fechado: true }], f.buscar)
+  const corpo = f.chamadas[0]!.corpo as {
+    stages: Array<{ metadata: { isClosed: string; probability: string } }>
+  }
+  assert.equal(corpo.stages[0]!.metadata.isClosed, 'true')
+  assert.equal(corpo.stages[0]!.metadata.probability, '1')
+})
+
+test('negócio novo é associado ao contato pelo tipo 3', async () => {
+  const f = fetchFalso([[/objects\/deals$/, { corpo: { id: 'd1' }, metodo: 'POST' }]])
+  const r = await salvarNegocio('at', '77', { nome: 'Ana', pipeline: 'p', estagio: 's1' }, undefined, f.buscar)
+  assert.deepEqual(r, { ok: true, id: 'd1', criado: true })
+  const corpo = f.chamadas[0]!.corpo as {
+    associations: Array<{ to: { id: string }; types: Array<{ associationTypeId: number }> }>
+  }
+  assert.equal(corpo.associations[0]!.to.id, '77')
+  assert.equal(corpo.associations[0]!.types[0]!.associationTypeId, 3)
+})
+
+test('lead reentregue atualiza o negócio, não abre um segundo', async () => {
+  // Dois negócios para o mesmo lead dobram o valor na previsão de vendas do
+  // cliente — o número que ele olha toda segunda.
+  const f = fetchFalso([[/objects\/deals\/d1/, { corpo: { id: 'd1' }, metodo: 'PATCH' }]])
+  const r = await salvarNegocio('at', '77', { nome: 'Ana', pipeline: 'p', estagio: 's2' }, 'd1', f.buscar)
+  assert.deepEqual(r, { ok: true, id: 'd1', criado: false })
+  assert.equal(f.chamadas.length, 1)
+  assert.equal(f.chamadas[0]!.metodo, 'PATCH')
+})
+
+test('negócio apagado no portal: o PATCH dá 404 e aí sim cria de novo', async () => {
+  const f = fetchFalso([
+    [/objects\/deals\/d1/, { status: 404, metodo: 'PATCH' }],
+    [/objects\/deals$/, { corpo: { id: 'd2' }, metodo: 'POST' }],
+  ])
+  const r = await salvarNegocio('at', '77', { nome: 'Ana', pipeline: 'p', estagio: 's1' }, 'd1', f.buscar)
+  assert.deepEqual(r, { ok: true, id: 'd2', criado: true })
 })

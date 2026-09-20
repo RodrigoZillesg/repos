@@ -23,9 +23,10 @@ import { requisitar } from './http.ts'
 const API = 'https://api.hubapi.com'
 const AUTORIZAR = 'https://app.hubspot.com/oauth/authorize'
 
-/** Contatos para ler e escrever, esquema de contato para criar as propriedades
- *  da Avexa, e notas para registrar o resumo da conversa. Nada além disso: um
- *  escopo amplo num CRM é acesso a toda a base comercial do cliente. */
+/** O que a Avexa pede no consentimento do cliente.
+ *
+ *  Cada linha aqui é acesso à base comercial de outra empresa, então a lista
+ *  cresce por decisão, não por conveniência. */
 export const ESCOPOS_HUBSPOT = [
   'oauth',
   'crm.objects.contacts.read',
@@ -37,7 +38,35 @@ export const ESCOPOS_HUBSPOT = [
   // concedeu devolve 403 — que aqui degrada o engajamento, nunca o contato.
   'crm.objects.meetings.read',
   'crm.objects.meetings.write',
+  // Negócios e o esquema deles. O esquema é o que permite LER os pipelines do
+  // portal e CRIAR um novo — sem ele, escolher pipeline seria digitar um id
+  // interno de cabeça, e criar um seria mandar o cliente sair da Avexa.
+  //
+  // É o escopo mais pesado que pedimos: aparece na tela de consentimento como
+  // permissão estrutural sobre o CRM, para todo cliente, mesmo os que nunca
+  // vão criar pipeline. Foi uma decisão consciente — pedir menos agora
+  // significaria um reconsentimento de todos os clientes no dia em que o
+  // primeiro precisar.
+  'crm.objects.deals.read',
+  'crm.objects.deals.write',
+  'crm.schemas.deals.read',
+  'crm.schemas.deals.write',
 ]
+
+/** Escopos que chegaram depois das primeiras conexões.
+ *
+ *  Um portal conectado antes disso tem token válido e sem eles: a chamada
+ *  devolve 403 e, sem esta checagem, a tela ofereceria escolher pipeline e o
+ *  operador levaria um erro sem entender que falta reconectar. */
+export const ESCOPOS_NEGOCIOS = [
+  'crm.objects.deals.read',
+  'crm.objects.deals.write',
+  'crm.schemas.deals.read',
+  'crm.schemas.deals.write',
+] as const
+
+export const temEscoposDeNegocios = (concedidos: readonly string[] | undefined): boolean =>
+  ESCOPOS_NEGOCIOS.every((e) => concedidos?.includes(e) ?? false)
 
 export interface ConfigHubspot {
   clientId: string
@@ -447,6 +476,194 @@ export async function salvarReuniaoHubspot(
     ...(buscar ? { buscar } : {}),
   })
   if (criar.ok) return { ok: true, id: (criar.corpo as { id?: string } | null)?.id ?? '', criada: true }
+  return {
+    ok: false,
+    erro: criar.erro ?? '',
+    semPermissao: criar.status === 403,
+    reenviavel: criar.reenviavel,
+  }
+}
+
+/* ------------------------- Pipelines e negócios --------------------------- */
+
+export interface EstagioHubspot {
+  id: string
+  rotulo: string
+  /** Estágio de fechamento (ganho ou perdido). Mandar um lead novo direto para
+   *  um deles é fechar negócio que nunca foi aberto. */
+  fechado: boolean
+  ordem: number
+}
+
+export interface PipelineHubspot {
+  id: string
+  rotulo: string
+  ordem: number
+  estagios: EstagioHubspot[]
+}
+
+function lerPipeline(p: {
+  id?: string
+  label?: string
+  displayOrder?: number
+  stages?: Array<{
+    id?: string
+    label?: string
+    displayOrder?: number
+    metadata?: { isClosed?: string | boolean }
+  }>
+}): PipelineHubspot | null {
+  if (!p.id) return null
+  return {
+    id: p.id,
+    rotulo: p.label ?? p.id,
+    ordem: p.displayOrder ?? 0,
+    estagios: (p.stages ?? [])
+      .filter((e) => e.id)
+      .map((e) => ({
+        id: e.id!,
+        rotulo: e.label ?? e.id!,
+        // O HubSpot manda `isClosed` como a string "true"/"false" em boa parte
+        // das respostas. Comparar com `true` daria sempre falso, e o estágio
+        // de fechado passaria por estágio comum.
+        fechado: e.metadata?.isClosed === true || e.metadata?.isClosed === 'true',
+        ordem: e.displayOrder ?? 0,
+      }))
+      .sort((a, b) => a.ordem - b.ordem),
+  }
+}
+
+/** Os pipelines de negócio deste portal, com seus estágios. */
+export async function listarPipelines(
+  accessToken: string,
+  buscar?: Buscar,
+): Promise<PipelineHubspot[] | { erro: string; semPermissao: boolean }> {
+  const r = await requisitar(`${API}/crm/v3/pipelines/deals`, {
+    metodo: 'GET',
+    cabecalhos: { authorization: `Bearer ${accessToken}` },
+    ...(buscar ? { buscar } : {}),
+  })
+  if (!r.ok) return { erro: r.erro ?? '', semPermissao: r.status === 403 }
+
+  const c = r.corpo as { results?: Parameters<typeof lerPipeline>[0][] } | null
+  return (c?.results ?? [])
+    .map(lerPipeline)
+    .filter((p): p is PipelineHubspot => p !== null)
+    .sort((a, b) => a.ordem - b.ordem)
+}
+
+export interface NovoEstagio {
+  rotulo: string
+  /** Probabilidade de fechamento, de 0 a 1. O HubSpot exige nos estágios de
+   *  fechamento: 1 para ganho, 0 para perdido. */
+  probabilidade?: number
+  fechado?: boolean
+}
+
+/** Cria um pipeline de negócios no portal do cliente.
+ *
+ *  Escrita estrutural no CRM de outra empresa — a coisa mais invasiva que a
+ *  Avexa faz. Por isso é sempre um gesto explícito do operador, nunca algo que
+ *  aconteça sozinho durante uma entrega. */
+export async function criarPipeline(
+  accessToken: string,
+  rotulo: string,
+  estagios: readonly NovoEstagio[],
+  buscar?: Buscar,
+): Promise<PipelineHubspot | { erro: string; semPermissao: boolean }> {
+  if (!rotulo.trim()) return { erro: 'o pipeline precisa de um nome', semPermissao: false }
+  if (estagios.length === 0) return { erro: 'um pipeline sem estágios não recebe negócio', semPermissao: false }
+
+  const r = await requisitar(`${API}/crm/v3/pipelines/deals`, {
+    cabecalhos: { authorization: `Bearer ${accessToken}` },
+    corpo: {
+      label: rotulo.trim(),
+      displayOrder: -1,
+      stages: estagios.map((e, i) => ({
+        label: e.rotulo,
+        displayOrder: i,
+        metadata: {
+          isClosed: String(e.fechado === true),
+          probability: String(e.probabilidade ?? (e.fechado ? 1 : 0.5)),
+        },
+      })),
+    },
+    ...(buscar ? { buscar } : {}),
+  })
+  if (!r.ok) return { erro: r.erro ?? '', semPermissao: r.status === 403 }
+
+  const p = lerPipeline((r.corpo ?? {}) as Parameters<typeof lerPipeline>[0])
+  return p ?? { erro: 'o HubSpot criou o pipeline mas não devolveu o id', semPermissao: false }
+}
+
+export interface NegocioHubspot {
+  nome: string
+  pipeline: string
+  estagio: string
+  valor?: number | null | undefined
+  /** Previsão de fechamento. */
+  fechaEm?: Date | undefined
+}
+
+export type ResultadoNegocio =
+  | { ok: true; id: string; criado: boolean }
+  | { ok: false; erro: string; semPermissao: boolean; reenviavel: boolean }
+
+/** Cria ou atualiza o negócio do lead. Associação 3 é a de negócio para
+ *  contato, como 202 é a de nota e 200 a de reunião.
+ *
+ *  Atualiza quando já existe, pelo id que guardamos: lead reentregue não pode
+ *  virar dois negócios no funil do cliente — o valor apareceria dobrado na
+ *  previsão de vendas dele. */
+export async function salvarNegocio(
+  accessToken: string,
+  contatoId: string,
+  n: NegocioHubspot,
+  negocioId?: string | undefined,
+  buscar?: Buscar,
+): Promise<ResultadoNegocio> {
+  const propriedades: Record<string, string> = {
+    dealname: n.nome,
+    pipeline: n.pipeline,
+    dealstage: n.estagio,
+    ...(n.valor !== null && n.valor !== undefined ? { amount: String(n.valor) } : {}),
+    ...(n.fechaEm ? { closedate: n.fechaEm.toISOString() } : {}),
+  }
+  const cab = { authorization: `Bearer ${accessToken}` }
+
+  if (negocioId) {
+    const patch = await requisitar(`${API}/crm/v3/objects/deals/${negocioId}`, {
+      metodo: 'PATCH',
+      cabecalhos: cab,
+      corpo: { properties: propriedades },
+      ...(buscar ? { buscar } : {}),
+    })
+    if (patch.ok) return { ok: true, id: negocioId, criado: false }
+    // 404: apagaram o negócio no portal. Criar de novo é o certo.
+    if (patch.status !== 404) {
+      return {
+        ok: false,
+        erro: patch.erro ?? '',
+        semPermissao: patch.status === 403,
+        reenviavel: patch.reenviavel,
+      }
+    }
+  }
+
+  const criar = await requisitar(`${API}/crm/v3/objects/deals`, {
+    cabecalhos: cab,
+    corpo: {
+      properties: propriedades,
+      associations: [
+        {
+          to: { id: contatoId },
+          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }],
+        },
+      ],
+    },
+    ...(buscar ? { buscar } : {}),
+  })
+  if (criar.ok) return { ok: true, id: (criar.corpo as { id?: string } | null)?.id ?? '', criado: true }
   return {
     ok: false,
     erro: criar.erro ?? '',

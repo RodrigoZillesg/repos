@@ -2,16 +2,22 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
-import { cliente, db, integracao } from '@avexa/db'
-import { entregarWebhook, type AgendaDoGoogle } from '@avexa/adapters'
+import { auditoria, cliente, db, integracao } from '@avexa/db'
+import {
+  entregarWebhook,
+  type AgendaDoGoogle,
+  type PipelineHubspot,
+} from '@avexa/adapters'
 import {
   definirDestino,
   definirWebhookDoCliente,
   desconectarCalendly,
   desconectarGoogle,
   desconectarHubspot,
+  criarPipelineDoCliente,
   listarAgendasDoCliente,
   listarTiposDeEvento,
+  pipelinesDoCliente,
   webhookDoCliente,
   type TipoGoogle,
   type TipoOAuth,
@@ -49,6 +55,68 @@ export async function salvarStatusHubspot(
   })
   revalidatePath('/integracoes')
   return { ok: true }
+}
+
+/* ------------------------- Pipelines do HubSpot --------------------------- */
+
+export async function buscarPipelines(
+  clienteId: string,
+): Promise<{ pipelines: PipelineHubspot[] } | { erro: string }> {
+  if (!(await exigirAdmin())) return { erro: 'sem permissão' }
+  const r = await pipelinesDoCliente(db(), clienteId)
+  return 'erro' in r ? r : { pipelines: r }
+}
+
+/** Para qual pipeline e estágio o lead vai, por qualificação.
+ *
+ *  Estágio em branco quer dizer "não abrir negócio". É a saída para o cliente
+ *  que não quer o lead frio entrando no funil dele. */
+export async function salvarFunilHubspot(
+  clienteId: string,
+  pipeline: string,
+  estagioQualificado: string,
+  estagioNaoQualificado: string,
+  nome = '',
+): Promise<{ ok: boolean }> {
+  if (!(await exigirAdmin())) return { ok: false }
+  await definirDestino(db(), clienteId, 'hubspot', {
+    pipeline: pipeline || null,
+    // O nome, para a tela abrir dizendo em qual funil o lead cai sem precisar
+    // buscar no HubSpot: o id sozinho é um número que não significa nada.
+    pipelineNome: pipeline ? nome || null : null,
+    estagioQualificado: estagioQualificado || null,
+    estagioNaoQualificado: estagioNaoQualificado || null,
+  })
+  revalidatePath('/integracoes')
+  return { ok: true }
+}
+
+/** Cria um pipeline no portal do cliente.
+ *
+ *  Escreve na estrutura do CRM de outra empresa — por isso fica em auditoria
+ *  com quem pediu. Um pipeline a mais não some sozinho: alguém do cliente vai
+ *  encontrá-lo lá e perguntar de onde veio. */
+export async function criarPipeline(
+  clienteId: string,
+  nome: string,
+): Promise<{ ok: true; pipeline: PipelineHubspot } | { ok: false; erro: string }> {
+  const s = await exigirAdmin()
+  if (!s) return { ok: false, erro: 'sem permissão' }
+
+  const r = await criarPipelineDoCliente(db(), clienteId, nome)
+  if ('erro' in r) return { ok: false, erro: r.erro }
+
+  await db().insert(auditoria).values({
+    usuarioId: s.usuarioId,
+    clienteId,
+    acao: 'hubspot.pipeline.criar',
+    entidade: 'integracao',
+    entidadeId: r.id,
+    detalhe: { nome: r.rotulo, estagios: r.estagios.map((x) => x.rotulo) },
+  })
+
+  revalidatePath('/integracoes')
+  return { ok: true, pipeline: r }
 }
 
 /** Salva a URL do webhook. O segredo volta uma vez e não é mostrado de novo. */
