@@ -40,6 +40,12 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm -r typecheck
           pnpm -r test
+          # O build do painel fica aqui, e não só no CI, porque ele pega uma
+          # classe de erro que o typecheck não vê: import de valor de um pacote
+          # de servidor dentro de um componente de browser. O tipo confere, o
+          # bundle não fecha. Sem isto, o erro só aparece depois do rsync, com
+          # o código já no servidor e o build quebrando lá dentro.
+          pnpm --filter @avexa/web build
 
       - name: Chave de deploy
         run: |

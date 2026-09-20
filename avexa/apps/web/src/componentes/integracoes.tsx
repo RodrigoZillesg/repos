@@ -12,7 +12,7 @@ import {
   Webhook,
 } from 'lucide-react'
 import type { ProvedorAgenda } from '@avexa/core'
-import { podeAgendar, type AgendaDoGoogle, type PipelineHubspot } from '@avexa/adapters'
+import type { AgendaDoGoogle, PipelineHubspot } from '@avexa/adapters'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
@@ -203,14 +203,14 @@ function EscolhaDeAgendas({
           const marcada = escolhidas.includes(a.id)
           // Só de leitura não pode receber evento. Fica listada e desmarcável
           // — o operador precisa ver que ela existe e por que não serve.
-          const bloqueada = !podeAgendar(a.acesso) && !marcada
+          const bloqueada = !a.agendavel && !marcada
           return linha(
             a.id,
             a.nome,
             marcada,
             <span className="mt-0.5 flex flex-wrap gap-1">
               {a.principal && <Selo>principal</Selo>}
-              {!podeAgendar(a.acesso) && (
+              {!a.agendavel && (
                 <Selo tom="alerta">só leitura — peça acesso de escrita ao dono</Selo>
               )}
             </span>,

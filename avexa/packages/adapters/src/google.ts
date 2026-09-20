@@ -146,9 +146,12 @@ export interface AgendaDoGoogle {
   nome: string
   /** A agenda pessoal da conta conectada. Costuma ser a que o operador quer. */
   principal: boolean
-  /** `owner`, `writer`, `reader` ou `freeBusyReader`, como o Google devolve.
-   *  Guardado cru porque quem decide o que fazer com cada nível é a tela. */
+  /** `owner`, `writer`, `reader` ou `freeBusyReader`, como o Google devolve. */
   acesso: string
+  /** Já decidido aqui, e não na tela: a tela é um componente de browser, e
+   *  importar a função daqui arrastaria o pacote inteiro de adaptadores —
+   *  `node:crypto` incluído — para dentro do bundle. */
+  agendavel: boolean
   fuso: string | null
 }
 
@@ -204,6 +207,7 @@ export async function listarAgendas(
         nome: item.summaryOverride ?? item.summary ?? item.id,
         principal: item.primary === true,
         acesso: item.accessRole ?? 'reader',
+        agendavel: podeAgendar(item.accessRole ?? 'reader'),
         fuso: item.timeZone ?? null,
       })
     }
@@ -217,7 +221,7 @@ export async function listarAgendas(
   return agendas.sort(
     (a, b) =>
       Number(b.principal) - Number(a.principal) ||
-      Number(podeAgendar(b.acesso)) - Number(podeAgendar(a.acesso)) ||
+      Number(b.agendavel) - Number(a.agendavel) ||
       a.nome.localeCompare(b.nome),
   )
 }
