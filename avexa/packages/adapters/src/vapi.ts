@@ -101,3 +101,193 @@ export function adaptadorVapi(cfg: ConfigVapi): AdaptadorCanal {
     },
   }
 }
+
+/* ------------------------------------------------------------------------ *
+ * Gestão de assistentes e números na Vapi.
+ *
+ * Cada cliente tem o seu agente e o seu número. A configuração mora no Avexa
+ * e é espelhada aqui — nunca o contrário.
+ * ------------------------------------------------------------------------ */
+
+export interface CredenciaisVapi {
+  apiKey: string
+  buscar?: Buscar
+}
+
+/** O que define um assistente, no formato da Vapi.
+ *
+ *  Campos escolhidos a partir de um agente real da conta, não do que a
+ *  documentação sugere. `firstMessage` é irmão do prompt de propósito: no
+ *  agente que inspecionamos os dois divergiam, e um se dizia obrigatório. */
+export interface AssistenteVapi {
+  nome: string
+  modeloProvedor: string
+  modelo: string
+  prompt: string
+  primeiraMensagem: string
+  mensagemEncerramento: string
+  mensagemCaixaPostal?: string | null
+  provedorVoz: string
+  vozId: string
+  modeloVoz?: string | null
+  transcritor: string
+  modeloTranscritor?: string | null
+  /** ISO curto: en, pt, es. Vai para o transcritor. */
+  idioma: string
+  /** Para onde a Vapi manda fim de chamada, transcrição e desfecho.
+   *  Sem isto os eventos não chegam ao Avexa, e o opt-out dito em voz alta
+   *  não entra na supressão global. */
+  webhook?: string | null
+  ajustes?: Record<string, unknown>
+}
+
+export type ResultadoAssistente =
+  | { ok: true; id: string }
+  | { ok: false; erro: string }
+
+const urlVapi = (caminho: string) => `https://api.vapi.ai${caminho}`
+
+const autorizacaoVapi = (c: CredenciaisVapi) => ({ authorization: `Bearer ${c.apiKey}` })
+
+/** Os desfechos que o motor precisa ver de forma estruturada.
+ *
+ *  O agente que inspecionamos definia sete desfechos no texto do prompt e
+ *  tinha `analysisPlan` desligado — ou seja, nada os capturava, e eles só
+ *  existiam soltos na transcrição. Aqui eles viram saída estruturada, que é
+ *  o que permite contar, filtrar e mostrar numa tela. */
+export const DESFECHOS_LIGACAO = [
+  'aceitou',
+  'recusou',
+  'sem_resposta',
+  'caixa_postal',
+  'segmento_errado',
+  'optout',
+  'reuniao_marcada',
+] as const
+
+function corpoDoAssistente(a: AssistenteVapi): Record<string, unknown> {
+  return {
+    name: a.nome,
+    model: {
+      provider: a.modeloProvedor,
+      model: a.modelo,
+      messages: [{ role: 'system', content: a.prompt }],
+    },
+    voice: {
+      provider: a.provedorVoz,
+      voiceId: a.vozId,
+      ...(a.modeloVoz ? { model: a.modeloVoz } : {}),
+    },
+    transcriber: {
+      provider: a.transcritor,
+      ...(a.modeloTranscritor ? { model: a.modeloTranscritor } : {}),
+      language: a.idioma,
+    },
+    firstMessage: a.primeiraMensagem,
+    endCallMessage: a.mensagemEncerramento,
+    endCallFunctionEnabled: true,
+    dialKeypadFunctionEnabled: true,
+    ...(a.mensagemCaixaPostal ? { voicemailMessage: a.mensagemCaixaPostal } : {}),
+    // Detecção nativa: uma dependência externa a menos que pode falhar no
+    // meio de uma ligação.
+    voicemailDetection: { provider: 'vapi' },
+    // Resumo e desfecho estruturados. Sem isto o que a ligação produziu só
+    // existe como texto na transcrição.
+    analysisPlan: {
+      summaryPlan: { enabled: true },
+      structuredDataPlan: {
+        enabled: true,
+        schema: {
+          type: 'object',
+          properties: {
+            desfecho: { type: 'string', enum: [...DESFECHOS_LIGACAO] },
+            motivo: { type: 'string' },
+            emailConfirmado: { type: 'string' },
+          },
+          required: ['desfecho'],
+        },
+      },
+    },
+    ...(a.webhook ? { server: { url: a.webhook, timeoutSeconds: 20 } } : {}),
+    ...(a.ajustes ?? {}),
+  }
+}
+
+export async function criarAssistente(
+  cred: CredenciaisVapi,
+  a: AssistenteVapi,
+): Promise<ResultadoAssistente> {
+  const r = await requisitar(urlVapi('/assistant'), {
+    cabecalhos: autorizacaoVapi(cred),
+    corpo: corpoDoAssistente(a),
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao criar o assistente' }
+
+  const id = (r.corpo as { id?: string } | null)?.id
+  return id ? { ok: true, id } : { ok: false, erro: 'a Vapi não devolveu o id do assistente' }
+}
+
+export async function atualizarAssistente(
+  cred: CredenciaisVapi,
+  id: string,
+  a: AssistenteVapi,
+): Promise<ResultadoAssistente> {
+  const r = await requisitar(urlVapi(`/assistant/${id}`), {
+    metodo: 'PATCH',
+    cabecalhos: autorizacaoVapi(cred),
+    corpo: corpoDoAssistente(a),
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  return r.ok ? { ok: true, id } : { ok: false, erro: r.erro ?? 'falha ao atualizar o assistente' }
+}
+
+export interface ImportacaoDeNumero {
+  e164: string
+  twilioAccountSid: string
+  twilioAuthToken: string
+  /** Vincula já na importação. O número sem assistente não atende ninguém. */
+  assistantId?: string
+  apelido?: string
+}
+
+/** Traz um número do Twilio para a Vapi.
+ *
+ *  Comprar no Twilio não basta para voz: a Vapi identifica número por id
+ *  próprio, e é esse id que o motor usa para ligar. São dois passos. */
+export async function importarNumeroNaVapi(
+  cred: CredenciaisVapi,
+  i: ImportacaoDeNumero,
+): Promise<ResultadoAssistente> {
+  const r = await requisitar(urlVapi('/phone-number'), {
+    cabecalhos: autorizacaoVapi(cred),
+    corpo: {
+      provider: 'twilio',
+      number: i.e164,
+      twilioAccountSid: i.twilioAccountSid,
+      twilioAuthToken: i.twilioAuthToken,
+      ...(i.assistantId ? { assistantId: i.assistantId } : {}),
+      ...(i.apelido ? { name: i.apelido } : {}),
+    },
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao importar o número' }
+
+  const id = (r.corpo as { id?: string } | null)?.id
+  return id ? { ok: true, id } : { ok: false, erro: 'a Vapi não devolveu o id do número' }
+}
+
+/** Liga um assistente a um número já importado. */
+export async function vincularAssistenteAoNumero(
+  cred: CredenciaisVapi,
+  numeroId: string,
+  assistantId: string,
+): Promise<{ ok: boolean; erro?: string }> {
+  const r = await requisitar(urlVapi(`/phone-number/${numeroId}`), {
+    metodo: 'PATCH',
+    cabecalhos: autorizacaoVapi(cred),
+    corpo: { assistantId },
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao vincular o assistente' }
+}

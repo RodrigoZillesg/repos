@@ -5,7 +5,9 @@ import { db } from '@avexa/db'
 import {
   ativarCliente,
   credenciaisDoAmbiente,
+  credenciaisVapiDoAmbiente,
   paraSlug,
+  webhookDeLigacao,
   webhookDeSms,
   type EscolhaDeNumero,
   type ResultadoAtivacao,
@@ -65,6 +67,7 @@ export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> 
 
   // As credenciais só saem do ambiente do servidor; nunca passam pelo navegador.
   const twilio = credenciaisDoAmbiente()
+  const vapi = credenciaisVapiDoAmbiente()
   if (escolha.modo === 'comprar' && !twilio) {
     return {
       ok: false,
@@ -91,6 +94,10 @@ export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> 
     numero: escolha,
     ...(twilio ? { twilio } : {}),
     webhookSms: webhookDeSms(),
+    // Sem a Vapi o agente nasce só aqui e fica pendente de publicação — o
+    // passo diz isso em vez de falhar a ativação inteira.
+    ...(vapi ? { vapi } : {}),
+    webhookLigacao: webhookDeLigacao(),
   })
 
   if (r.ok) {

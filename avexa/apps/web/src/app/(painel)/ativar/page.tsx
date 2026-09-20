@@ -8,7 +8,7 @@ import { ativar } from './acoes'
 
 export const dynamic = 'force-dynamic'
 
-/** Os 9 passos da ativação. Oito são nossos; um depende do cliente, e é o único
+/** Os 10 passos da ativação. Nove são nossos; um depende do cliente, e é o único
  *  que ele precisa entender. A distinção fica visível de propósito: é o que
  *  sustenta a promessa comercial de "cliente novo no ar sem trabalho dele". */
 const PASSOS = [
@@ -25,6 +25,11 @@ const PASSOS = [
   {
     n: 'Definir o número do cliente',
     d: 'Reaproveita um número livre, usa um escolhido à mão ou compra um novo no Twilio. O mesmo número liga e manda SMS; WhatsApp e e-mail saem sempre da Avexa.',
+    tag: 'auto',
+  },
+  {
+    n: 'Criar o agente de voz',
+    d: 'O agente nasce do padrão global, com o prompt e a primeira mensagem do cliente, vai para a Vapi e é ligado ao número dele. Cada cliente tem o seu — ajustar um não afeta os outros.',
     tag: 'auto',
   },
   {

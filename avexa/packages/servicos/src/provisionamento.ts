@@ -19,7 +19,8 @@ import {
   type Grafo,
   type Pais,
 } from '@avexa/core'
-import type { CredenciaisTwilio } from '@avexa/adapters'
+import type { CredenciaisTwilio, CredenciaisVapi } from '@avexa/adapters'
+import { criarAgenteDoCliente, importarNumeroDoCliente, publicarAgente } from './agente.ts'
 import { MODELOS_AVEXA, ROTEIROS_AVEXA } from './modelos.ts'
 import { definirRemetente, provisionarNumero } from './numeros.ts'
 
@@ -50,6 +51,10 @@ export interface OpcoesAtivacao {
   twilio?: CredenciaisTwilio
   /** Para onde o Twilio manda resposta e opt-out do número comprado. */
   webhookSms?: string | null
+  /** Sem isto o agente de voz nasce só no Avexa e não vai para a Vapi. */
+  vapi?: CredenciaisVapi
+  /** Para onde a Vapi manda fim de chamada, transcrição e desfecho. */
+  webhookLigacao?: string | null
 }
 
 export interface EntradaAtivacao {
@@ -223,7 +228,7 @@ export async function ativarCliente(
     await db.insert(clienteCanal).values({ clienteId, canal: c, ativo: entrada.canais[c] ?? false })
   }
   marcar(
-    4,
+    5,
     'Ligar WhatsApp e SMS',
     entrada.canais.whatsapp || entrada.canais.sms ? 'feito' : 'pulado',
     'entrou no roteamento dos números da Avexa, sem cadastro novo',
@@ -315,6 +320,57 @@ export async function ativarCliente(
     }
   }
 
+  // 4. O agente de voz do cliente.
+  //
+  // Nasce no Avexa a partir do padrão global e só depois vai para a Vapi:
+  // se a Vapi falhar, o cliente fica com agente configurado e não publicado,
+  // que se resolve com um botão — e não sem agente nenhum.
+  if (entrada.canais.ligacao) {
+    const agente = await criarAgenteDoCliente(db, clienteId, {
+      nome: entrada.nome,
+      produto: entrada.produto,
+      idioma: paisCliente === 'BR' ? 'pt' : 'en',
+      ...(entrada.setor ? { setor: entrada.setor } : {}),
+      ...(entrada.emailDoTime ? { emailDoTime: entrada.emailDoTime } : {}),
+    })
+
+    if (!agente.ok) {
+      marcar(4, 'Agente de voz', 'falhou', agente.erro)
+      avisos.push(`O agente de voz não foi criado (${agente.erro}). A ligação não sai.`)
+    } else if (!opcoes.vapi) {
+      marcar(4, 'Agente de voz', 'feito', 'criado no Avexa · publicar na Vapi ainda pendente')
+      avisos.push('Sem credenciais da Vapi o agente existe aqui mas não está publicado lá.')
+    } else {
+      const pub = await publicarAgente(db, agente.agenteId, opcoes.vapi, opcoes.webhookLigacao)
+      if (!pub.ok) {
+        marcar(4, 'Agente de voz', 'falhou', `criado aqui, mas a Vapi recusou: ${pub.erro}`)
+        avisos.push(`O agente não foi publicado na Vapi (${pub.erro}). A ligação não sai.`)
+      } else {
+        // Comprar no Twilio não basta para voz: a Vapi identifica número por
+        // id próprio, e é esse id que o motor usa para ligar.
+        const imp = opcoes.twilio
+          ? await importarNumeroDoCliente(db, clienteId, opcoes.vapi, opcoes.twilio)
+          : { ok: false as const, erro: 'sem credenciais do Twilio para importar o número' }
+
+        marcar(
+          4,
+          'Agente de voz',
+          imp.ok ? 'feito' : 'falhou',
+          imp.ok
+            ? 'publicado na Vapi e ligado ao número do cliente'
+            : `publicado na Vapi, mas o número não foi importado: ${imp.erro}`,
+        )
+        if (!imp.ok) {
+          avisos.push(
+            `O número não foi importado para a Vapi (${imp.erro}). A ligação sairia do número errado.`,
+          )
+        }
+      }
+    }
+  } else {
+    marcar(4, 'Agente de voz', 'pulado', 'voz não contratada')
+  }
+
   // 5 e 6. Templates e roteiros, com as variáveis já preenchidas.
   const valores = { produto: entrada.produto, cliente: entrada.nome }
   let criados = 0
@@ -335,7 +391,7 @@ export async function ativarCliente(
     if (!m.aprovaSozinho) pendentesMeta++
   }
   marcar(
-    5,
+    6,
     'Criar os templates',
     'feito',
     `${criados} modelos da Avexa, com a marca do cliente${
@@ -357,7 +413,7 @@ export async function ativarCliente(
     ? Object.entries(ROTEIROS_AVEXA).map(([k, v]) => `${k}: ${renderizar(v, valores).texto}`)
     : []
   marcar(
-    6,
+    7,
     'Gerar roteiro e textos',
     entrada.canais.ligacao ? 'feito' : 'pulado',
     entrada.canais.ligacao
@@ -387,7 +443,7 @@ export async function ativarCliente(
     urls.push({ fluxo: nome, url: urlDeEntrada(slug, fslug) })
   }
   marcar(2, 'Gerar as URLs de entrada', 'feito', `${urls.length} endereço(s), um por fluxo`)
-  marcar(7, 'Montar os fluxos', 'feito', `canais no fluxo: ${canais.join(', ') || 'nenhum'}`)
+  marcar(8, 'Montar os fluxos', 'feito', `canais no fluxo: ${canais.join(', ') || 'nenhum'}`)
 
   // Destino de entrega.
   if (entrada.emailDoTime) {
