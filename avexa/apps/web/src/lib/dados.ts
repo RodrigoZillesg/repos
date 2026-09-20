@@ -8,6 +8,7 @@ import {
   execucao,
   fluxo,
   fluxoVersao,
+  integracao,
   lead,
   numero,
   reuniao,
@@ -62,6 +63,33 @@ export async function canaisDoCliente(clienteId: string) {
     .from(clienteCanal)
     .where(eq(clienteCanal.clienteId, clienteId))
   return Object.fromEntries(linhas.map((l) => [l.canal, l.ativo])) as Record<string, boolean>
+}
+
+/** As agendas que o cliente escolheu em Integrações, para o construtor mostrar
+ *  como destinos do nó de agendamento.
+ *
+ *  Lê da configuração salva, não do Google: abrir o construtor não deve depender
+ *  de a conta do cliente estar respondendo agora. Quem atualiza essa lista é a
+ *  tela de Integrações, que é onde a escolha é feita. */
+export async function agendasDoCliente(
+  clienteId: string,
+): Promise<Array<{ id: string; nome: string }>> {
+  const [linha] = await db()
+    .select({ config: integracao.config })
+    .from(integracao)
+    .where(
+      and(
+        eq(integracao.clienteId, clienteId),
+        eq(integracao.tipo, 'google_calendar'),
+        eq(integracao.ativo, true),
+      ),
+    )
+    .limit(1)
+
+  const cfg = (linha?.config ?? {}) as Record<string, unknown>
+  const ids = (cfg.calendarios as string[] | undefined) ?? []
+  const nomes = (cfg.calendariosNomes as Record<string, string> | undefined) ?? {}
+  return ids.map((id) => ({ id, nome: nomes[id] ?? id }))
 }
 
 export async function listarFluxos(clienteId: string) {

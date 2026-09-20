@@ -4,10 +4,12 @@ import {
   acrescentarLinha,
   configGoogleDoAmbiente,
   garantirCabecalho,
+  listarAgendas,
   renovarAcesso,
   revogar,
   trocarCodigo,
   urlDeConsentimento,
+  type AgendaDoGoogle,
 } from '@avexa/adapters'
 import {
   conexaoValida,
@@ -96,6 +98,20 @@ export async function desconectarGoogle(db: Db, clienteId: string, tipo: TipoGoo
   const refresh = linha ? refreshTokenDe(clienteId, tipo, linha.segredo) : null
   if (cfg && refresh) await revogar(cfg, refresh)
   await removerIntegracao(db, clienteId, tipo)
+}
+
+/** As agendas que a conta conectada deste cliente enxerga.
+ *
+ *  Existe para a tela oferecer escolha em vez de pedir e-mail digitado: um id
+ *  errado só aparecia na hora de marcar, como "nenhuma das agendas
+ *  configuradas está acessível", com um lead quente esperando. */
+export async function listarAgendasDoCliente(
+  db: Db,
+  clienteId: string,
+): Promise<AgendaDoGoogle[] | { erro: string }> {
+  const conexao = await conexaoGoogle(db, clienteId, 'google_calendar')
+  if ('erro' in conexao) return { erro: conexao.erro }
+  return listarAgendas(conexao.accessToken)
 }
 
 export const CABECALHO_PLANILHA = [

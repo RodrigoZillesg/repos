@@ -3,13 +3,14 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { cliente, db, integracao } from '@avexa/db'
-import { entregarWebhook } from '@avexa/adapters'
+import { entregarWebhook, type AgendaDoGoogle } from '@avexa/adapters'
 import {
   definirDestino,
   definirWebhookDoCliente,
   desconectarCalendly,
   desconectarGoogle,
   desconectarHubspot,
+  listarAgendasDoCliente,
   listarTiposDeEvento,
   webhookDoCliente,
   type TipoGoogle,
@@ -138,21 +139,37 @@ export async function salvarEmailTime(
   return { ok: true }
 }
 
+/** Guarda as agendas escolhidas, e também como elas se chamam.
+ *
+ *  O nome não é enfeite: o id de uma agenda de recurso ou de grupo é uma
+ *  sequência ilegível, e sem o nome a tela mostraria ao operador algo que ele
+ *  não reconhece como sendo o time do cliente dele. */
 export async function salvarAgendas(
   clienteId: string,
-  calendarios: string,
+  calendarios: string[],
   rodizio: boolean,
+  nomes: Record<string, string> = {},
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
+  const ids = [...new Set(calendarios.map((x) => x.trim()).filter(Boolean))]
   await definirDestino(db(), clienteId, 'google_calendar', {
-    calendarios: calendarios
-      .split(/[\n,]/)
-      .map((x) => x.trim())
-      .filter(Boolean),
+    calendarios: ids,
+    // Só os nomes do que ficou escolhido: guardar o resto seria uma cópia da
+    // conta Google do cliente envelhecendo aqui dentro.
+    calendariosNomes: Object.fromEntries(ids.map((id) => [id, nomes[id] ?? id])),
     rodizio,
   })
   revalidatePath('/integracoes')
   return { ok: true }
+}
+
+/** Lista as agendas da conta conectada, para a tela oferecer escolha. */
+export async function buscarAgendas(
+  clienteId: string,
+): Promise<{ agendas: AgendaDoGoogle[] } | { erro: string }> {
+  if (!(await exigirAdmin())) return { erro: 'sem permissão' }
+  const r = await listarAgendasDoCliente(db(), clienteId)
+  return 'erro' in r ? r : { agendas: r }
 }
 
 export async function salvarPlanilha(

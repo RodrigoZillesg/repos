@@ -141,6 +141,87 @@ export async function revogar(cfg: ConfigGoogle, token: string): Promise<boolean
 
 /* ------------------------------- Calendar -------------------------------- */
 
+export interface AgendaDoGoogle {
+  id: string
+  nome: string
+  /** A agenda pessoal da conta conectada. Costuma ser a que o operador quer. */
+  principal: boolean
+  /** `owner`, `writer`, `reader` ou `freeBusyReader`, como o Google devolve.
+   *  Guardado cru porque quem decide o que fazer com cada nível é a tela. */
+  acesso: string
+  fuso: string | null
+}
+
+/** Pode receber um evento criado por nós, ou só ser consultada?
+ *
+ *  A diferença não aparece ao olhar a lista, e escolher uma agenda só de
+ *  leitura daria um cliente "configurado" que falha na primeira marcação. */
+export const podeAgendar = (acesso: string) => acesso === 'owner' || acesso === 'writer'
+
+/** As agendas que a conta conectada enxerga.
+ *
+ *  Devolve tudo, inclusive o que não dá para agendar: esconder as agendas só de
+ *  leitura faria o operador procurar uma agenda que ele vê no Google e não
+ *  acha aqui. Quem mostra é que explica o porquê. */
+export async function listarAgendas(
+  accessToken: string,
+  buscar?: Buscar,
+): Promise<AgendaDoGoogle[] | { erro: string }> {
+  const agendas: AgendaDoGoogle[] = []
+  let pagina: string | undefined
+
+  // Conta de agência costuma ter muita agenda compartilhada; sem paginar, o
+  // time do cliente apareceria pela metade e ninguém desconfiaria.
+  for (let i = 0; i < 10; i++) {
+    const q = new URLSearchParams({ maxResults: '250', showHidden: 'true' })
+    if (pagina) q.set('pageToken', pagina)
+
+    const r = await requisitar(
+      `https://www.googleapis.com/calendar/v3/users/me/calendarList?${q.toString()}`,
+      { metodo: 'GET', cabecalhos: { authorization: `Bearer ${accessToken}` }, ...(buscar ? { buscar } : {}) },
+    )
+    if (!r.ok) return { erro: r.erro ?? '' }
+
+    const c = r.corpo as {
+      items?: Array<{
+        id?: string
+        summary?: string
+        summaryOverride?: string
+        primary?: boolean
+        accessRole?: string
+        timeZone?: string
+        deleted?: boolean
+      }>
+      nextPageToken?: string
+    } | null
+
+    for (const item of c?.items ?? []) {
+      if (!item.id || item.deleted) continue
+      agendas.push({
+        id: item.id,
+        // `summaryOverride` é o apelido que o dono da conta deu. Ele vence,
+        // porque é o nome pelo qual essa pessoa conhece a agenda.
+        nome: item.summaryOverride ?? item.summary ?? item.id,
+        principal: item.primary === true,
+        acesso: item.accessRole ?? 'reader',
+        fuso: item.timeZone ?? null,
+      })
+    }
+
+    pagina = c?.nextPageToken
+    if (!pagina) break
+  }
+
+  // A principal primeiro, depois quem dá para agendar, depois por nome: é a
+  // ordem em que o operador procura.
+  return agendas.sort(
+    (a, b) =>
+      Number(b.principal) - Number(a.principal) ||
+      Number(podeAgendar(b.acesso)) - Number(podeAgendar(a.acesso)) ||
+      a.nome.localeCompare(b.nome),
+  )
+}
+
 /** Resultado etiquetado de propósito: um `Record` com assinatura de índice não
  *  se distingue de `{ erro }` por `'erro' in x`, e a checagem passaria em
  *  silêncio pelo caminho errado. */

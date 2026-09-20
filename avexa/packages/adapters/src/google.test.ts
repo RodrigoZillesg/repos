@@ -4,10 +4,13 @@ import {
   ESCOPOS,
   acrescentarLinha,
   criarEvento,
+  listarAgendas,
   ocupados,
+  podeAgendar,
   renovarAcesso,
   trocarCodigo,
   urlDeConsentimento,
+  type AgendaDoGoogle,
 } from './google.ts'
 
 function fetchFalso(respostas: Array<{ status?: number; corpo?: unknown }>) {
@@ -163,4 +166,88 @@ test('a planilha recebe a linha no fim, sem sobrescrever nada', async () => {
   assert.equal(url.searchParams.get('insertDataOption'), 'INSERT_ROWS')
   // null vira string vazia: a API rejeita null no meio dos valores.
   assert.deepEqual(JSON.parse(String(f.chamadas[0]!.init.body)).values, [['Ana', 82, '']])
+})
+
+test('a lista de agendas pagina, senão o time do cliente apareceria pela metade', async () => {
+  const f = fetchFalso([
+    {
+      corpo: {
+        items: [{ id: 'a@c.com', summary: 'Ana', accessRole: 'writer' }],
+        nextPageToken: 'p2',
+      },
+    },
+    { corpo: { items: [{ id: 'b@c.com', summary: 'Bruno', accessRole: 'owner' }] } },
+  ])
+  const r = await listarAgendas('tok', f.buscar)
+  assert.ok(!('erro' in r))
+  assert.deepEqual(
+    (r as AgendaDoGoogle[]).map((a) => a.id),
+    ['a@c.com', 'b@c.com'],
+  )
+  assert.equal(f.chamadas.length, 2)
+  assert.match(f.chamadas[1]!.url, /pageToken=p2/)
+})
+
+test('o apelido do dono vence o nome original da agenda', async () => {
+  // É o nome pelo qual essa pessoa conhece a agenda. Mostrar o original faria o
+  // operador procurar na lista algo que ele não reconhece.
+  const f = fetchFalso([
+    {
+      corpo: {
+        items: [
+          { id: 'x@c.com', summary: 'x@c.com', summaryOverride: 'Comercial — SP', accessRole: 'writer' },
+        ],
+      },
+    },
+  ])
+  const r = (await listarAgendas('tok', f.buscar)) as AgendaDoGoogle[]
+  assert.equal(r[0]!.nome, 'Comercial — SP')
+})
+
+test('agenda apagada fica de fora', async () => {
+  const f = fetchFalso([
+    {
+      corpo: {
+        items: [
+          { id: 'viva@c.com', summary: 'Viva', accessRole: 'owner' },
+          { id: 'morta@c.com', summary: 'Morta', accessRole: 'owner', deleted: true },
+        ],
+      },
+    },
+  ])
+  const r = (await listarAgendas('tok', f.buscar)) as AgendaDoGoogle[]
+  assert.deepEqual(r.map((a) => a.id), ['viva@c.com'])
+})
+
+test('a ordem é a que o operador procura: principal, depois quem dá para agendar', async () => {
+  const f = fetchFalso([
+    {
+      corpo: {
+        items: [
+          { id: 'feriados', summary: 'Feriados', accessRole: 'reader' },
+          { id: 'ana@c.com', summary: 'Ana', accessRole: 'writer' },
+          { id: 'eu@c.com', summary: 'Minha agenda', accessRole: 'owner', primary: true },
+        ],
+      },
+    },
+  ])
+  const r = (await listarAgendas('tok', f.buscar)) as AgendaDoGoogle[]
+  assert.deepEqual(r.map((a) => a.id), ['eu@c.com', 'ana@c.com', 'feriados'])
+})
+
+test('só leitura não agenda: freeBusyReader e reader ficam marcados', () => {
+  // Escolher uma agenda só de leitura daria um cliente "configurado" que falha
+  // na primeira marcação, quando já existe um lead esperando horário.
+  assert.equal(podeAgendar('owner'), true)
+  assert.equal(podeAgendar('writer'), true)
+  assert.equal(podeAgendar('reader'), false)
+  assert.equal(podeAgendar('freeBusyReader'), false)
+})
+
+test('falha do Google não vira lista vazia', async () => {
+  // Lista vazia diria "esta conta não tem agenda", e alguém reconectaria uma
+  // integração que está inteira.
+  const f = fetchFalso([{ status: 403, corpo: { error: { message: 'insufficient permissions' } } }])
+  const r = await listarAgendas('tok', f.buscar)
+  assert.ok('erro' in r)
 })

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
 import {
+  agendasDoCliente,
   canaisDoCliente,
   carregarFluxo,
   clientePadrao,
@@ -45,6 +46,7 @@ export default async function PaginaFluxos({
   const carregado = await carregarFluxo(escolhido.id)
   const canais = await canaisDoCliente(cli.id)
   const modelos = await listarTemplates(cli.id)
+  const agendas = await agendasDoCliente(cli.id)
   const limites = await carregarLimites(db())
 
   const porCanal: Record<string, string[]> = {}
@@ -106,6 +108,7 @@ export default async function PaginaFluxos({
         canais={canais}
         templates={porCanal}
         fluxos={fluxos.map((f) => ({ id: f.id, nome: f.nome }))}
+        agendas={agendas}
         fluxoId={escolhido.id}
         podeEditar={s.permissoes.editarFluxos}
         limites={limites}

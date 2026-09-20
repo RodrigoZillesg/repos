@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type ReactNode } from 'react'
 import {
   CalendarClock,
   CalendarDays,
@@ -12,8 +12,9 @@ import {
   Webhook,
 } from 'lucide-react'
 import type { ProvedorAgenda } from '@avexa/core'
+import { podeAgendar, type AgendaDoGoogle } from '@avexa/adapters'
 import { Botao } from '@/componentes/ui/botao'
-import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
+import { Ajuda, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 
 export interface EstadoCliente {
@@ -21,7 +22,13 @@ export interface EstadoCliente {
   provedorEscolhido: ProvedorAgenda | null
   googleConfigurado: boolean
   calendlyConfigurado: boolean
-  calendar: { conectada: boolean; calendarios: string[]; rodizio: boolean }
+  calendar: {
+    conectada: boolean
+    calendarios: string[]
+    /** Nome de cada agenda escolhida, como estava na hora de salvar. */
+    nomes: Record<string, string>
+    rodizio: boolean
+  }
   calendly: {
     conectada: boolean
     tipoDeEvento: string | null
@@ -50,7 +57,13 @@ interface Props {
   estado: EstadoCliente
   podeAdministrar: boolean
   aoDesligar: (clienteId: string, tipo: Tipo) => Promise<{ ok: boolean }>
-  aoSalvarAgendas: (c: string, calendarios: string, rodizio: boolean) => Promise<{ ok: boolean }>
+  aoSalvarAgendas: (
+    c: string,
+    calendarios: string[],
+    rodizio: boolean,
+    nomes: Record<string, string>,
+  ) => Promise<{ ok: boolean }>
+  aoBuscarAgendas: (c: string) => Promise<{ agendas: AgendaDoGoogle[] } | { erro: string }>
   aoSalvarPlanilha: (c: string, planilhaId: string, aba: string) => Promise<{ ok: boolean }>
   aoSalvarTipoDeEvento: (
     c: string,
@@ -100,12 +113,167 @@ function SemCredencial({ o_que }: { o_que: string }) {
   )
 }
 
+/** Escolha das agendas do time.
+ *
+ *  Era um campo de texto livre com um id por linha. O id de agenda é longo,
+ *  ninguém sabe de cabeça, e digitar errado não dava erro nenhum: a integração
+ *  ficava marcada como pronta e só falhava na hora de marcar, com o lead na
+ *  linha. Aqui a lista vem da conta conectada, então o que dá para escolher é
+ *  exatamente o que existe. */
+function EscolhaDeAgendas({
+  escolhidas,
+  nomesSalvos,
+  lista,
+  manual,
+  podeEditar,
+  ocupado,
+  aoAlternar,
+  aoDigitarManual,
+  aoCarregar,
+}: {
+  escolhidas: string[]
+  nomesSalvos: Record<string, string>
+  lista: AgendaDoGoogle[] | null
+  manual: string
+  podeEditar: boolean
+  ocupado: boolean
+  aoAlternar: (id: string) => void
+  aoDigitarManual: (v: string) => void
+  aoCarregar: () => void
+}) {
+  // Escolhidas que não vieram na lista: agenda removida da conta, ou acesso que
+  // o dono retirou. Continuam visíveis para poderem ser desmarcadas — sumir com
+  // elas deixaria o cliente com uma agenda configurada que ninguém enxerga.
+  const orfas = lista ? escolhidas.filter((id) => !lista.some((a) => a.id === id)) : escolhidas
+
+  const linha = (
+    id: string,
+    nome: string,
+    marcada: boolean,
+    detalhe: ReactNode,
+    bloqueada: boolean,
+  ) => (
+    <label
+      key={id}
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px] ${
+        bloqueada ? 'opacity-60' : 'cursor-pointer'
+      } ${marcada ? 'border-[var(--color-acento)]' : ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={marcada}
+        disabled={!podeEditar || bloqueada}
+        onChange={() => aoAlternar(id)}
+        className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-acento)]"
+      />
+      <span className="min-w-0">
+        <span className="block truncate">{nome}</span>
+        <span className="block truncate font-mono text-[11px] text-[var(--color-tinta-3)]">
+          {id}
+        </span>
+        {detalhe}
+      </span>
+    </label>
+  )
+
+  return (
+    <div className="mt-4">
+      <Rotulo htmlFor="cal-carregar">Agendas do time</Rotulo>
+
+      <div className="grid gap-1.5">
+        {lista?.map((a) => {
+          const marcada = escolhidas.includes(a.id)
+          // Só de leitura não pode receber evento. Fica listada e desmarcável
+          // — o operador precisa ver que ela existe e por que não serve.
+          const bloqueada = !podeAgendar(a.acesso) && !marcada
+          return linha(
+            a.id,
+            a.nome,
+            marcada,
+            <span className="mt-0.5 flex flex-wrap gap-1">
+              {a.principal && <Selo>principal</Selo>}
+              {!podeAgendar(a.acesso) && (
+                <Selo tom="alerta">só leitura — peça acesso de escrita ao dono</Selo>
+              )}
+            </span>,
+            bloqueada,
+          )
+        })}
+
+        {orfas.map((id) =>
+          linha(
+            id,
+            nomesSalvos[id] ?? id,
+            true,
+            lista ? (
+              <span className="mt-0.5 block">
+                <Selo tom="alerta">não aparece nesta conta</Selo>
+              </span>
+            ) : null,
+            false,
+          ),
+        )}
+
+        {lista === null && escolhidas.length === 0 && (
+          <p className="text-[13px] text-[var(--color-tinta-3)]">
+            Nenhuma agenda escolhida ainda.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Botao
+          id="cal-carregar"
+          variante="contorno"
+          tamanho="pequeno"
+          disabled={!podeEditar || ocupado}
+          onClick={aoCarregar}
+        >
+          {lista === null ? 'Carregar agendas do Google' : 'Recarregar'}
+        </Botao>
+      </div>
+
+      <div className="mt-3">
+        <Rotulo htmlFor="cal-manual">Agenda que não está na lista</Rotulo>
+        <div className="flex gap-2">
+          <Entrada
+            id="cal-manual"
+            value={manual}
+            disabled={!podeEditar}
+            onChange={(ev) => aoDigitarManual(ev.target.value)}
+            placeholder="ana@cliente.com"
+            className="font-mono text-xs"
+          />
+          <Botao
+            variante="contorno"
+            tamanho="pequeno"
+            disabled={!podeEditar || !manual.trim() || escolhidas.includes(manual.trim())}
+            onClick={() => {
+              aoAlternar(manual.trim())
+              aoDigitarManual('')
+            }}
+          >
+            Adicionar
+          </Botao>
+        </div>
+        <Ajuda>
+          Uma agenda compartilhada com a conta conectada mas não adicionada à lista dela não
+          aparece acima. Nesse caso o e-mail entra aqui — e só funciona se o dono tiver dado
+          permissão para alterar eventos.
+        </Ajuda>
+      </div>
+    </div>
+  )
+}
+
 export function Integracoes(p: Props) {
   const { estado: e } = p
   const [aviso, setAviso] = useState<string | null>(null)
   const [pendente, iniciar] = useTransition()
 
-  const [agendas, setAgendas] = useState(e.calendar.calendarios.join('\n'))
+  const [agendas, setAgendas] = useState<string[]>(e.calendar.calendarios)
+  const [listaAgendas, setListaAgendas] = useState<AgendaDoGoogle[] | null>(null)
+  const [agendaManual, setAgendaManual] = useState('')
   const [rodizio, setRodizio] = useState(e.calendar.rodizio)
   const [planilha, setPlanilha] = useState(e.sheets.planilhaId ?? '')
   const [aba, setAba] = useState(e.sheets.aba ?? 'Leads')
@@ -191,22 +359,28 @@ export function Integracoes(p: Props) {
           />
         ) : (
           <>
-            <div className="mt-4">
-              <Rotulo htmlFor="cal">Agendas do time</Rotulo>
-              <AreaTexto
-                id="cal"
-                rows={3}
-                value={agendas}
-                disabled={!p.podeAdministrar}
-                onChange={(ev) => setAgendas(ev.target.value)}
-                placeholder={'ana@cliente.com\nbruno@cliente.com'}
-                className="font-mono text-xs"
-              />
-              <Ajuda>
-                Um e-mail por linha. Quem não compartilhou a agenda com a conta conectada fica de
-                fora do rodízio, em vez de entrar como se estivesse livre.
-              </Ajuda>
-            </div>
+            <EscolhaDeAgendas
+              escolhidas={agendas}
+              nomesSalvos={e.calendar.nomes}
+              lista={listaAgendas}
+              manual={agendaManual}
+              podeEditar={p.podeAdministrar}
+              ocupado={pendente}
+              aoAlternar={(id) =>
+                setAgendas((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]))
+              }
+              aoDigitarManual={setAgendaManual}
+              aoCarregar={() =>
+                iniciar(async () => {
+                  const r = await p.aoBuscarAgendas(e.clienteId)
+                  if ('erro' in r) setAviso(r.erro)
+                  else {
+                    setListaAgendas(r.agendas)
+                    setAviso(`${r.agendas.length} agenda(s) nesta conta.`)
+                  }
+                })
+              }
+            />
             <label className="mt-3 flex cursor-pointer items-center gap-2 text-[13px]">
               <input
                 type="checkbox"
@@ -221,7 +395,16 @@ export function Integracoes(p: Props) {
               <Botao
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoSalvarAgendas(e.clienteId, agendas, rodizio), 'Salvo.')}
+                onClick={() =>
+                  rodar(
+                    () =>
+                      p.aoSalvarAgendas(e.clienteId, agendas, rodizio, {
+                        ...e.calendar.nomes,
+                        ...Object.fromEntries((listaAgendas ?? []).map((a) => [a.id, a.nome])),
+                      }),
+                    'Salvo.',
+                  )
+                }
               >
                 Salvar
               </Botao>

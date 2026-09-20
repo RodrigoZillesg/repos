@@ -45,11 +45,18 @@ export async function provedorDoCliente(
   return null
 }
 
+export interface RoteamentoDoPedido {
+  rodizio?: boolean | undefined
+  /** Uma agenda específica entre as configuradas, escolhida na etapa do fluxo.
+   *  `undefined` usa todas — é o comportamento de sempre. */
+  calendario?: string | null | undefined
+}
+
 export async function criarAdaptadorAgenda(
   db: Db,
   clienteId: string,
   limites: LimitesMotor,
-  rodizio?: boolean,
+  roteamento: RoteamentoDoPedido = {},
 ): Promise<AdaptadorAgenda | { erro: string; precisaReconectar?: boolean }> {
   const provedor = await provedorDoCliente(db, clienteId)
   if (!provedor) {
@@ -68,12 +75,23 @@ export async function criarAdaptadorAgenda(
 
   const conexao = await conexaoGoogle(db, clienteId, 'google_calendar')
   if ('erro' in conexao) return conexao
+  const configuradas = (conexao.config.calendarios as string[] | undefined) ?? []
+
+  // Uma etapa pode mirar uma agenda só — é o roteamento: o ramo de vendas marca
+  // com o time comercial, o de pós-venda com o onboarding. Só aceitamos o que o
+  // cliente configurou: um id vindo de um fluxo antigo, ou de uma agenda que
+  // saiu da lista, marcaria reunião num calendário que ninguém acompanha.
+  const escolhida = roteamento.calendario
+  if (escolhida && !configuradas.includes(escolhida)) {
+    return { erro: `a agenda ${escolhida} não está entre as configuradas para este cliente` }
+  }
+
   return adaptadorGoogleAgenda({
     accessToken: conexao.accessToken,
-    calendarios: (conexao.config.calendarios as string[] | undefined) ?? [],
+    calendarios: escolhida ? [escolhida] : configuradas,
     // A etapa do fluxo manda: é onde o operador escolheu "rodízio entre
     // consultores". Sem etapa dizendo nada, vale o que ficou na integração.
-    rodizio: rodizio ?? conexao.config.rodizio !== false,
+    rodizio: escolhida ? false : (roteamento.rodizio ?? conexao.config.rodizio !== false),
     limites,
   })
 }
@@ -84,6 +102,7 @@ export interface PedidoAgendamento extends PedidoReuniao {
   execucaoId?: string
   limites: LimitesMotor
   rodizio?: boolean
+  calendario?: string | null
 }
 
 /** Oferece a reunião e registra o que aconteceu.
@@ -95,7 +114,10 @@ export async function oferecerReuniao(
   db: Db,
   p: PedidoAgendamento,
 ): Promise<ResultadoReuniao & { provedor?: ProvedorAgenda }> {
-  const adaptador = await criarAdaptadorAgenda(db, p.clienteId, p.limites, p.rodizio)
+  const adaptador = await criarAdaptadorAgenda(db, p.clienteId, p.limites, {
+    rodizio: p.rodizio,
+    calendario: p.calendario,
+  })
   if ('erro' in adaptador) {
     return {
       tipo: 'falhou',

@@ -8,6 +8,7 @@ import { clientePadrao, listarClientes } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 import { Integracoes, type EstadoCliente } from '@/componentes/integracoes'
 import {
+  buscarAgendas,
   buscarTiposDeEvento,
   desligar,
   escolherProvedorAgenda,
@@ -62,6 +63,9 @@ export default async function PaginaIntegracoes({
     calendar: {
       conectada: conectada('google_calendar'),
       calendarios: (cfg('google_calendar').calendarios as string[] | undefined) ?? [],
+      // Nomes guardados na última escolha, para a tela abrir legível sem ir ao
+      // Google a cada visita.
+      nomes: (cfg('google_calendar').calendariosNomes as Record<string, string> | undefined) ?? {},
       rodizio: cfg('google_calendar').rodizio !== false,
     },
     calendly: {
@@ -147,6 +151,7 @@ export default async function PaginaIntegracoes({
           podeAdministrar={s.permissoes.administrar}
           aoDesligar={desligar}
           aoSalvarAgendas={salvarAgendas}
+          aoBuscarAgendas={buscarAgendas}
           aoSalvarPlanilha={salvarPlanilha}
           aoSalvarTipoDeEvento={salvarTipoDeEvento}
           aoBuscarTipos={buscarTiposDeEvento}

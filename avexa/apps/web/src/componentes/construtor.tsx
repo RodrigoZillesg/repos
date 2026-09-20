@@ -23,6 +23,10 @@ interface Props {
   canais: Record<string, boolean>
   templates: Record<string, string[]>
   fluxos: Array<{ id: string; nome: string }>
+  /** As agendas que o cliente configurou em Integrações. É a lista de destinos
+   *  possíveis do nó "Agendar reunião" — sem ela, escolher agenda seria digitar
+   *  um id de cabeça. */
+  agendas: Array<{ id: string; nome: string }>
   fluxoId: string
   podeEditar: boolean
   limites: LimitesMotor
@@ -186,6 +190,7 @@ export function Construtor(p: Props) {
             etapa={selecionada.etapa}
             templates={p.templates}
             fluxos={p.fluxos.filter((f) => f.id !== p.fluxoId)}
+            agendas={p.agendas}
             podeEditar={p.podeEditar}
             t={p.t}
             aoMudar={(chave, valor) =>
@@ -417,6 +422,7 @@ function Inspetor({
   etapa,
   templates,
   fluxos,
+  agendas,
   podeEditar,
   t,
   aoMudar,
@@ -426,6 +432,7 @@ function Inspetor({
   etapa: Etapa
   templates: Record<string, string[]>
   fluxos: Array<{ id: string; nome: string }>
+  agendas: Array<{ id: string; nome: string }>
   podeEditar: boolean
   t: Record<Chave, string>
   aoMudar: (chave: string, valor: string) => void
@@ -493,6 +500,35 @@ function Inspetor({
                   <option key={f.id}>{f.nome}</option>
                 ))}
               </Selecao>
+            )}
+
+            {campo.tipo === 'agenda' && (
+              <>
+                <Selecao
+                  id={id}
+                  value={valor}
+                  disabled={!podeEditar}
+                  onChange={(e) => aoMudar(campo.k, e.target.value)}
+                >
+                  <option value="">Todas as agendas configuradas</option>
+                  {agendas.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.nome}
+                    </option>
+                  ))}
+                  {/* Agenda escolhida que saiu da lista do cliente: aparece para
+                      poder ser trocada, em vez de o campo voltar sozinho para
+                      "todas" e mudar o destino sem ninguém ver. */}
+                  {valor && !agendas.some((a) => a.id === valor) && (
+                    <option value={valor}>{valor} (fora das configuradas)</option>
+                  )}
+                </Selecao>
+                <Ajuda>
+                  {agendas.length === 0
+                    ? 'Este cliente ainda não escolheu agendas em Integrações. Enquanto isso, o nó não tem onde marcar.'
+                    : 'Dois nós de agendamento podem mirar times diferentes — é assim que o fluxo roteia a reunião.'}
+                </Ajuda>
+              </>
             )}
 
             {campo.tipo === 'url' && (

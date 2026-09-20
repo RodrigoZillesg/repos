@@ -8,7 +8,7 @@ import type { Canal, TipoEtapa } from './tipos.ts'
 export interface CampoEtapa {
   k: string
   rotulo: string
-  tipo: 'texto' | 'textarea' | 'select' | 'url' | 'template' | 'fluxo'
+  tipo: 'texto' | 'textarea' | 'select' | 'url' | 'template' | 'fluxo' | 'agenda'
   opcoes?: readonly string[]
   /** Para o tipo `template`: de qual canal listar. */
   canalTemplate?: Canal
@@ -41,6 +41,34 @@ const OPS = [
   'começa com',
   'termina com',
 ] as const
+
+/** Para onde esta etapa manda a reunião.
+ *
+ *  O campo `agenda` já foi um select de dois rótulos fixos que só ligava e
+ *  desligava o rodízio. Hoje ele guarda o id de uma agenda do cliente, ou fica
+ *  vazio para dizer "todas as configuradas" — é assim que dois ramos do mesmo
+ *  fluxo marcam em times diferentes.
+ *
+ *  Os dois rótulos antigos continuam sendo lidos porque estão salvos em fluxos
+ *  publicados: um deles virando "id de agenda" faria a marcação falhar em
+ *  produção com "nenhuma das agendas configuradas está acessível". */
+const AGENDA_LEGADA: Record<string, boolean> = {
+  'Time comercial do cliente': false,
+  'Rodízio entre consultores': true,
+}
+
+export interface RoteamentoDeAgenda {
+  /** Agenda específica, ou `null` para todas as configuradas no cliente. */
+  calendario: string | null
+  rodizio: boolean
+}
+
+export function roteamentoDaEtapa(cfg: Record<string, string>): RoteamentoDeAgenda {
+  const a = (cfg.agenda ?? '').trim()
+  if (a in AGENDA_LEGADA) return { calendario: null, rodizio: AGENDA_LEGADA[a]! }
+  if (a) return { calendario: a, rodizio: false }
+  return { calendario: null, rodizio: cfg.distribuicao !== 'Primeira disponível' }
+}
 
 export const ETAPAS: Record<TipoEtapa, DefEtapa> = {
   entrada: {
@@ -318,11 +346,15 @@ export const ETAPAS: Record<TipoEtapa, DefEtapa> = {
     descricao:
       'Oferece horários da agenda do time do cliente dentro da própria conversa e confirma o compromisso.',
     campos: [
+      { k: 'agenda', rotulo: 'Agenda', tipo: 'agenda' },
       {
-        k: 'agenda',
-        rotulo: 'Agenda',
+        k: 'distribuicao',
+        rotulo: 'Entre as agendas',
         tipo: 'select',
-        opcoes: ['Time comercial do cliente', 'Rodízio entre consultores'],
+        opcoes: ['Rodízio entre consultores', 'Primeira disponível'],
+        // Com uma agenda só não há entre quem distribuir, e o campo só
+        // confundiria quem abre o inspetor.
+        visivelSe: (c) => roteamentoDaEtapa(c).calendario === null,
       },
       { k: 'dur', rotulo: 'Duração', tipo: 'select', opcoes: ['15 minutos', '30 minutos', '45 minutos'] },
       {
@@ -332,7 +364,11 @@ export const ETAPAS: Record<TipoEtapa, DefEtapa> = {
         opcoes: ['1 hora', '24 horas', 'Não enviar'],
       },
     ],
-    resumo: (c) => `${c.dur} · lembrete: ${(c.lembrete ?? '').toLowerCase()}`,
+    resumo: (c) => {
+      const r = roteamentoDaEtapa(c)
+      const onde = r.calendario ?? (r.rodizio ? 'rodízio entre as agendas' : 'primeira agenda livre')
+      return `${c.dur ?? '30 minutos'} · ${onde} · lembrete: ${(c.lembrete ?? 'não enviar').toLowerCase()}`
+    },
   },
 
   marcar: {

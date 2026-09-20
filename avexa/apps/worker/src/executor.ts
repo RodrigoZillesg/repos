@@ -7,6 +7,7 @@ import {
   podeContatar,
   proximaInstrucao,
   renderizar,
+  roteamentoDaEtapa,
   somarDentroDaJanela,
   type Canal,
   type ContextoFluxo,
@@ -517,7 +518,7 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
         fusoDoLead: p.lead.fusoHorario ?? 'Australia/Sydney',
         limites: p.limites,
         de: amb.agora(),
-        rodizio: p.etapa.cfg.agenda === 'Rodízio entre consultores',
+        ...roteamentoDaEtapa(p.etapa.cfg),
       })
 
       if (r.tipo === 'marcado') {
