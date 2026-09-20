@@ -1,3 +1,5 @@
+import type { Papel } from '@avexa/servicos'
+
 /** O que cada papel pode ver e fazer.
  *
  *  A promessa do artefato é literal: designer e copywriter entram no painel sem
@@ -5,7 +7,7 @@
  *  é aplicado no servidor, não escondendo botão no cliente — esconder botão não
  *  é controle de acesso. */
 
-export type Papel = 'admin' | 'operacao' | 'designer' | 'copy' | 'cliente'
+export type { Papel }
 
 export interface Permissoes {
   verFluxos: boolean

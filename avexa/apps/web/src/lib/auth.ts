@@ -35,29 +35,73 @@ export interface Sessao {
  *  Devolve sucesso mesmo para e-mail desconhecido: dizer "esse e-mail não
  *  existe" entrega ao mundo quem tem acesso ao painel. */
 export async function pedirLink(email: string, baseUrl: string): Promise<void> {
+  await enviarLink(email, baseUrl, 'login')
+}
+
+/** O mesmo link, com o texto de quem está chegando agora.
+ *
+ *  "Seu link de acesso" para quem nunca ouviu falar da Avexa parece phishing —
+ *  e um convite que vai para o lixo eletrônico é um cliente que liga
+ *  perguntando por que não consegue entrar. */
+export async function enviarConvite(
+  email: string,
+  baseUrl: string,
+  convidadoPor: string,
+): Promise<{ enviado: boolean; link: string | null }> {
+  return enviarLink(email, baseUrl, 'convite', convidadoPor)
+}
+
+async function enviarLink(
+  email: string,
+  baseUrl: string,
+  tipo: 'login' | 'convite',
+  convidadoPor?: string,
+): Promise<{ enviado: boolean; link: string | null }> {
   const emitido = await emitirLinkDeAcesso(email, baseUrl)
-  if (!emitido) return
+  if (!emitido) return { enviado: false, link: null }
 
   const { link, usuarioId, email: limpo, nome, idioma } = emitido
   const cfg = adaptadoresDoAmbiente().email
+  const en = idioma === 'en'
 
   if (!cfg) {
     // Sem Resend configurado o link não sai daqui. Em desenvolvimento isso é o
-    // esperado, e o log é o canal de entrega.
+    // esperado, e o log é o canal de entrega. No convite o link também volta a
+    // quem convidou, para ele repassar — senão o usuário novo fica trancado
+    // sem ninguém entender por quê.
     console.log(`[avexa] link de acesso para ${limpo}: ${link}`)
-    return
+    return { enviado: false, link: tipo === 'convite' ? link : null }
   }
 
-  await adaptadorResend(cfg).enviar({
-    tentativaId: `login-${usuarioId}`,
+  const de = convidadoPor ? (en ? ` by ${convidadoPor}` : ` por ${convidadoPor}`) : ''
+  const corpo =
+    tipo === 'convite'
+      ? en
+        ? `Hi ${nome},\n\nYou have been given access to Avexa${de}.\n\nOpen this link to sign in. It expires in ${VALIDADE_LINK_MIN} minutes and works once — after that, ask for a new one at ${baseUrl}/entrar.\n\n${link}`
+        : `Oi ${nome},\n\nVocê recebeu acesso ao Avexa${de}.\n\nAbra este link para entrar. Ele expira em ${VALIDADE_LINK_MIN} minutos e funciona uma vez só — depois disso, peça outro em ${baseUrl}/entrar.\n\n${link}`
+      : en
+        ? `Hi ${nome},\n\nOpen this link to sign in. It expires in ${VALIDADE_LINK_MIN} minutes and works once.\n\n${link}`
+        : `Oi ${nome},\n\nAbra este link para entrar. Ele expira em ${VALIDADE_LINK_MIN} minutos e funciona uma vez só.\n\n${link}`
+
+  const r = await adaptadorResend(cfg).enviar({
+    tentativaId: `${tipo}-${usuarioId}`,
     canal: 'email',
     destinatario: limpo,
-    assunto: idioma === 'en' ? 'Your Avexa sign-in link' : 'Seu link de acesso ao Avexa',
-    texto:
-      idioma === 'en'
-        ? `Hi ${nome},\n\nOpen this link to sign in. It expires in ${VALIDADE_LINK_MIN} minutes and works once.\n\n${link}`
-        : `Oi ${nome},\n\nAbra este link para entrar. Ele expira em ${VALIDADE_LINK_MIN} minutos e funciona uma vez só.\n\n${link}`,
+    assunto:
+      tipo === 'convite'
+        ? en
+          ? 'You have been given access to Avexa'
+          : 'Você recebeu acesso ao Avexa'
+        : en
+          ? 'Your Avexa sign-in link'
+          : 'Seu link de acesso ao Avexa',
+    texto: corpo,
   })
+
+  // O envio pode falhar por domínio não verificado, cota, endereço recusado.
+  // No convite isso não pode passar em silêncio: o admin acha que avisou o
+  // cliente e ninguém recebeu nada.
+  return { enviado: r.ok, link: r.ok ? null : tipo === 'convite' ? link : null }
 }
 
 /** Troca o token do e-mail por uma sessão. O token é queimado no uso. */
