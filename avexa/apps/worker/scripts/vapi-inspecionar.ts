@@ -7,6 +7,7 @@
  *
  *      pnpm --filter @avexa/worker vapi                 # resumo
  *      pnpm --filter @avexa/worker vapi <id-do-agente>  # um agente inteiro
+ *      pnpm --filter @avexa/worker vapi ferramentas     # as tools da conta
  */
 import { requisitar } from '@avexa/adapters'
 
@@ -21,6 +22,18 @@ const pegar = (caminho: string) =>
   requisitar(`https://api.vapi.ai${caminho}`, { metodo: 'GET', cabecalhos })
 
 const alvo = (process.argv[2] ?? '').trim()
+
+if (alvo === 'ferramentas') {
+  // As tools decidem o que é nativo da Vapi e o que alguém construiu por
+  // fora. Dá para confundir as duas coisas olhando só o prompt.
+  const r = await pegar('/tool')
+  if (!r.ok) {
+    console.error(`falhou: ${r.erro}`)
+    process.exit(1)
+  }
+  console.log(JSON.stringify(r.corpo, null, 2))
+  process.exit(0)
+}
 
 if (alvo) {
   const r = await pegar(`/assistant/${alvo}`)
