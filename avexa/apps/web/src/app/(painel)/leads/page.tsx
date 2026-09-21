@@ -10,7 +10,7 @@ import {
   resumoDeLeads,
   type LeadNaLista,
 } from '@/lib/dados'
-import { periodoValido } from '@/lib/resumo'
+import { periodoValido, textoParaCursor } from '@/lib/resumo'
 import { ResumoLeads } from '@/componentes/resumo-leads'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
 import { CORES } from '@/lib/utils'
@@ -43,7 +43,7 @@ const qualificadoSemSaida = (l: LeadNaLista) =>
 export default async function PaginaLeads({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string; dias?: string }>
+  searchParams: Promise<{ cliente?: string; dias?: string; antes?: string; depois?: string }>
 }) {
   const s = await sessaoAtual()
   if (!s) redirect('/entrar')
@@ -57,16 +57,26 @@ export default async function PaginaLeads({
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
   const periodo = periodoValido(q.dias)
-  const [leads, resumo] = await Promise.all([
-    listarLeads(s, cli.id, periodo),
+  // Cursor inválido na URL vira "sem cursor", ou seja, primeira página. Cair na
+  // primeira página é melhor do que derrubar a tela com data inválida.
+  const depois = textoParaCursor(q.depois)
+  const antes = textoParaCursor(q.antes)
+
+  const [pagina, resumo] = await Promise.all([
+    listarLeads(s, cli.id, { dias: periodo, depois, antes }),
     resumoDeLeads(s, cli.id, periodo),
   ])
+  const leads = pagina.leads
   const detalhe = !s.permissoes.escopoCliente
 
-  // Preserva o cliente escolhido ao trocar de período, senão o operador que
-  // está olhando um cliente específico volta para o primeiro da lista.
-  const linkDoPeriodo = (dias: number) =>
-    s.permissoes.escopoCliente ? `/leads?dias=${dias}` : `/leads?cliente=${cli.slug}&dias=${dias}`
+  // Preserva o cliente escolhido, senão o operador que está olhando um cliente
+  // específico volta para o primeiro da lista ao navegar.
+  const base = s.permissoes.escopoCliente ? '/leads?' : `/leads?cliente=${cli.slug}&`
+  // Trocar o período recomeça a paginação: um cursor de 90 dias atrás não tem
+  // sentido numa janela de 7, e levaria a uma página vazia.
+  const linkDoPeriodo = (dias: number) => `${base}dias=${dias}`
+  const linkDaPagina = (sentido: 'antes' | 'depois', cursor: string) =>
+    `${base}dias=${periodo}&${sentido}=${encodeURIComponent(cursor)}`
 
   // No fuso do cliente, não no do lead: quem lê esta tela é o time que vai
   // entrar na reunião.
@@ -125,9 +135,22 @@ export default async function PaginaLeads({
 
       {leads.length === 0 ? (
         <Cartao>
-          <p className="text-sm text-[var(--color-tinta-3)]">
-            Nenhum lead nos últimos {periodo} dias.
-          </p>
+          {/* Cursor velho aponta para uma faixa que já não existe — mudou o
+              período, ou os leads saíram pela retenção. Sem esta saída, a
+              página fica sem lista e sem setas: um beco. */}
+          {depois || antes ? (
+            <p className="text-sm text-[var(--color-tinta-3)]">
+              Nada nesta página.{' '}
+              <Link href={linkDoPeriodo(periodo) as '/leads'} className="underline">
+                Voltar ao início da lista
+              </Link>
+              .
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--color-tinta-3)]">
+              Nenhum lead nos últimos {periodo} dias.
+            </p>
+          )}
           <p className="mt-2 text-xs leading-relaxed text-[var(--color-tinta-3)]">
             Os leads chegam pela URL de webhook que o cliente colou na saída do formulário dele.
           </p>
@@ -263,12 +286,40 @@ export default async function PaginaLeads({
         </div>
       )}
 
-      {/* A lista para em 100 linhas. Sem este aviso, o resumo diria 140 leads
-          em cima de uma tabela com 100 e nada explicaria a diferença. */}
-      {resumo && resumo.total > leads.length && (
-        <p className="mt-3 text-xs text-[var(--color-tinta-3)]">
-          Mostrando os {leads.length} mais recentes de {resumo.total} leads no período.
-        </p>
+      {(pagina.anterior || pagina.proxima) && (
+        <nav className="mt-4 flex flex-wrap items-center gap-2">
+          {pagina.anterior ? (
+            <Link
+              href={linkDaPagina('antes', pagina.anterior) as '/leads'}
+              className="rounded-lg border px-3 py-1.5 text-[13px]"
+            >
+              ← Mais recentes
+            </Link>
+          ) : (
+            // O botão fica visível e apagado em vez de sumir: um botão que
+            // aparece e desaparece move a página debaixo do cursor.
+            <span className="rounded-lg border px-3 py-1.5 text-[13px] opacity-40">
+              ← Mais recentes
+            </span>
+          )}
+          {pagina.proxima ? (
+            <Link
+              href={linkDaPagina('depois', pagina.proxima) as '/leads'}
+              className="rounded-lg border px-3 py-1.5 text-[13px]"
+            >
+              Mais antigos →
+            </Link>
+          ) : (
+            <span className="rounded-lg border px-3 py-1.5 text-[13px] opacity-40">
+              Mais antigos →
+            </span>
+          )}
+          {resumo && (
+            <span className="text-xs text-[var(--color-tinta-3)]">
+              {leads.length} de {resumo.total} leads no período
+            </span>
+          )}
+        </nav>
       )}
     </div>
   )

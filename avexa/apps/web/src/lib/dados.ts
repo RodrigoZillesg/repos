@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, desc, eq, gte, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, lt, or } from 'drizzle-orm'
 import {
   cliente,
   clienteCanal,
@@ -17,7 +17,14 @@ import {
   tentativa,
 } from '@avexa/db'
 import { CORTE_QUALIFICADO, type Grafo } from '@avexa/core'
-import type { NumeroDoResumo, Periodo } from './resumo'
+import {
+  POR_PAGINA,
+  cursorParaTexto,
+  fronteiras,
+  type Cursor,
+  type NumeroDoResumo,
+  type Periodo,
+} from './resumo'
 import type { Sessao } from './auth'
 
 /** Consultas do painel.
@@ -166,16 +173,45 @@ export interface LeadNaLista {
   reuniao: ReuniaoDoLead | null
 }
 
+export interface PaginaDeLeads {
+  leads: LeadNaLista[]
+  /** Cursores para as setas. `null` quando aquele lado acabou — é o que
+   *  desabilita o botão em vez de levar a uma página vazia. */
+  anterior: string | null
+  proxima: string | null
+}
+
+export interface PedidoDeLeads {
+  dias?: number
+  /** Página seguinte, a partir deste ponto (mais antigos que ele). */
+  depois?: Cursor | null
+  /** Página anterior (mais novos que ele). */
+  antes?: Cursor | null
+  limite?: number
+}
+
 export async function listarLeads(
   s: Sessao,
   clienteId: string,
-  dias?: number,
-  limite = 100,
-): Promise<LeadNaLista[]> {
-  if (!s.permissoes.verLeads) return []
+  p: PedidoDeLeads = {},
+): Promise<PaginaDeLeads> {
+  const vazia: PaginaDeLeads = { leads: [], anterior: null, proxima: null }
+  if (!s.permissoes.verLeads) return vazia
   // O papel cliente só enxerga o próprio cliente, venha o que vier na URL.
   const alvo = s.permissoes.escopoCliente ? s.clienteId : clienteId
-  if (!alvo) return []
+  if (!alvo) return vazia
+
+  const { dias } = p
+  const limite = p.limite ?? POR_PAGINA
+  // Os dois sentidos juntos na URL pedem linhas mais novas E mais antigas que
+  // cursores diferentes: o resultado seria sempre vazio. Voltar ganha, porque
+  // é o clique mais recente de quem montou essa URL.
+  const antes = p.antes ?? null
+  const depois = antes ? null : (p.depois ?? null)
+  // Voltar é a mesma consulta de trás para frente: pega os mais NOVOS que o
+  // cursor em ordem crescente e inverte no fim. Sem isso, "anterior" precisaria
+  // guardar a pilha de páginas visitadas, que se perde ao recarregar.
+  const voltando = antes !== null
 
   const d = db()
   // Sem join com execução: um lead pode ter mais de uma (entrou de novo por
@@ -193,19 +229,62 @@ export async function listarLeads(
       criadoEm: lead.criadoEm,
     })
     .from(lead)
-    // A mesma janela do resumo no topo. Resumo de 30 dias em cima de uma lista
-    // sem recorte mostraria "12 leads" acima de uma tabela com 80 linhas, e
-    // quem lê não tem como saber qual dos dois está certo.
     .where(
-      dias
-        ? and(eq(lead.clienteId, alvo), gte(lead.criadoEm, new Date(Date.now() - dias * 86_400_000)))
-        : eq(lead.clienteId, alvo),
+      and(
+        eq(lead.clienteId, alvo),
+        // A mesma janela do resumo no topo. Resumo de 30 dias em cima de uma
+        // lista sem recorte mostraria "12 leads" acima de uma tabela com 80
+        // linhas, e quem lê não tem como saber qual dos dois está certo.
+        ...(dias ? [gte(lead.criadoEm, new Date(Date.now() - dias * 86_400_000))] : []),
+        // A comparação é sobre o par (data, id), não só sobre a data: leads do
+        // mesmo formulário caem no mesmo milissegundo, e comparar só a data
+        // pularia um deles na virada da página.
+        ...(depois
+          ? [
+              or(
+                lt(lead.criadoEm, depois.criadoEm),
+                and(eq(lead.criadoEm, depois.criadoEm), lt(lead.id, depois.id)),
+              )!,
+            ]
+          : []),
+        ...(antes
+          ? [
+              or(
+                gt(lead.criadoEm, antes.criadoEm),
+                and(eq(lead.criadoEm, antes.criadoEm), gt(lead.id, antes.id)),
+              )!,
+            ]
+          : []),
+      ),
     )
-    .orderBy(desc(lead.criadoEm))
-    .limit(limite)
+    .orderBy(
+      voltando ? asc(lead.criadoEm) : desc(lead.criadoEm),
+      voltando ? asc(lead.id) : desc(lead.id),
+    )
+    // Uma linha a mais do que cabe na página: é ela que diz se existe página
+    // seguinte, sem uma segunda consulta de contagem.
+    .limit(limite + 1)
 
-  const ids = leads.map((l) => l.id)
-  if (ids.length === 0) return []
+  const temMais = leads.length > limite
+  const pagina = leads.slice(0, limite)
+  // Voltando, a consulta veio de trás para frente. A tela sempre mostra do mais
+  // novo para o mais antigo.
+  if (voltando) pagina.reverse()
+
+  const primeiro = pagina[0]
+  const ultimo = pagina[pagina.length - 1]
+
+  const setas = fronteiras({
+    voltando,
+    comCursor: depois !== null,
+    temMais,
+    vazia: pagina.length === 0,
+  })
+  const anterior = setas.anterior && primeiro ? cursorParaTexto(primeiro) : null
+  const proxima = setas.proxima && ultimo ? cursorParaTexto(ultimo) : null
+
+  const ids = pagina.map((l) => l.id)
+  if (ids.length === 0) return vazia
 
   // Limitado aos leads desta página: carregar as tentativas do cliente inteiro
   // cresce com a base e esta tela é a mais aberta do painel.
@@ -295,14 +374,18 @@ export async function listarLeads(
     })
   }
 
-  return leads.map((l) => ({
-    ...l,
-    estado: porExecucao.get(l.id)?.estado ?? null,
-    motivo: porExecucao.get(l.id)?.motivo ?? null,
-    contatos: porLead.get(l.id) ?? 0,
-    entregas: entregasPorLead.get(l.id) ?? [],
-    reuniao: reuniaoPorLead.get(l.id) ?? null,
-  }))
+  return {
+    leads: pagina.map((l) => ({
+      ...l,
+      estado: porExecucao.get(l.id)?.estado ?? null,
+      motivo: porExecucao.get(l.id)?.motivo ?? null,
+      contatos: porLead.get(l.id) ?? 0,
+      entregas: entregasPorLead.get(l.id) ?? [],
+      reuniao: reuniaoPorLead.get(l.id) ?? null,
+    })),
+    anterior,
+    proxima,
+  }
 }
 
 export async function tentativasDoLead(s: Sessao, leadId: string) {
