@@ -2,19 +2,23 @@
 
 import { useMemo } from 'react'
 import {
+  BaseEdge,
   Background,
   BackgroundVariant,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
+  getSmoothStepPath,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from '@xyflow/react'
-import { TriangleAlert } from 'lucide-react'
+import { Plus, TriangleAlert } from 'lucide-react'
 import { ETAPAS, aplanar, preencherPercurso, type Achado, type Etapa, type Grafo } from '@avexa/core'
 import { CORES } from '@/lib/utils'
 import { ALTURA_NO, LARGURA_NO, posicionar } from '@/lib/posicionar'
@@ -108,6 +112,90 @@ function CartaoDoNo({ data }: NodeProps<Node<DadosDoNo>>) {
 
 const tiposDeNo = { etapa: CartaoDoNo }
 
+export interface DadosDaAresta extends Record<string, unknown> {
+  /** Onde inserir: a etapa que fica DEPOIS da nova. `null` quando inserir ali
+   *  não tem significado único, e aí o "+" não aparece. */
+  alvo: string | null
+  aoInserir: (alvoId: string) => void
+}
+
+/** Aresta com o "+" no meio, que é o gesto mais repetido de quem monta fluxo.
+ *
+ *  Só aparece onde "inserir entre os dois" quer dizer uma coisa só:
+ *
+ *  - numa sequência, entra antes do nó de baixo;
+ *  - na entrada de um ramo, entra no topo daquele ramo.
+ *
+ *  Não aparece na junção nem na volta. Na junção, os dois ramos desembocam no
+ *  mesmo nó: o mesmo "+" apareceria duas vezes e inserir ali cairia no tronco,
+ *  não no ramo de onde o operador clicou. Na volta, "entre o fim do corpo e a
+ *  repetição" não é um lugar. Oferecer o gesto e fazer outra coisa é pior do
+ *  que não oferecer. */
+function ArestaComMais({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  label,
+  data,
+}: EdgeProps<Edge<DadosDaAresta>>) {
+  const [caminho, meioX, meioY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  })
+  const alvo = data?.alvo ?? null
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={caminho}
+        {...(markerEnd ? { markerEnd } : {})}
+        {...(style ? { style } : {})}
+      />
+      <EdgeLabelRenderer>
+        {/* `pointer-events-auto` não é enfeite: o container do
+            EdgeLabelRenderer tem `pointer-events: none`, então sem isto o
+            botão existe, aparece, e o clique atravessa direto para o canvas. */}
+        <div
+          className="nodrag nopan pointer-events-auto absolute flex items-center gap-1"
+          style={{ transform: `translate(-50%, -50%) translate(${meioX}px, ${meioY}px)` }}
+        >
+          {label && (
+            <span className="rounded bg-[var(--color-fundo)] px-1 text-[11px] text-[var(--color-tinta-2)]">
+              {label}
+            </span>
+          )}
+          {alvo && (
+            <button
+              type="button"
+              title="Inserir etapa aqui"
+              onClick={() => data!.aoInserir(alvo)}
+              // Discreto até o ponteiro chegar perto: um "+" aceso em cada
+              // aresta viraria ruído num fluxo com quinze etapas.
+              className="grid h-5 w-5 place-items-center rounded-full border bg-[var(--color-superficie)] text-[var(--color-tinta-3)] opacity-0 transition hover:border-[var(--color-acento)] hover:text-[var(--color-acento)] focus:opacity-100 group-hover/canvas:opacity-100"
+            >
+              <Plus aria-hidden size={12} />
+              <span className="sr-only">Inserir etapa aqui</span>
+            </button>
+          )}
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
+const tiposDeAresta = { comMais: ArestaComMais }
+
 interface Props {
   grafo: Grafo
   sel: string | null
@@ -115,10 +203,22 @@ interface Props {
   porEtapa: Map<string, Achado[]>
   /** Etapas por onde a última simulação passou. Vazio antes de simular. */
   percorridas: Set<string>
+  podeEditar: boolean
   aoSelecionar: (id: string) => void
+  /** Insere uma etapa ANTES da etapa `alvoId`, que é o que o "+" na aresta faz. */
+  aoInserirAntes: (alvoId: string) => void
 }
 
-function Tela({ grafo, sel, canais, porEtapa, percorridas, aoSelecionar }: Props) {
+function Tela({
+  grafo,
+  sel,
+  canais,
+  porEtapa,
+  percorridas,
+  podeEditar,
+  aoSelecionar,
+  aoInserirAntes,
+}: Props) {
   const { nos, arestas } = useMemo(() => {
     const desenhado = aplanar(grafo)
     const posicoes = posicionar(desenhado)
@@ -152,13 +252,16 @@ function Tela({ grafo, sel, canais, porEtapa, percorridas, aoSelecionar }: Props
       }
     })
 
-    const arestas: Edge[] = desenhado.arestas.map((a) => {
+    const arestas: Edge<DadosDaAresta>[] = desenhado.arestas.map((a) => {
       const viva = noCaminho.has(a.de) && noCaminho.has(a.para)
+      // Só onde "inserir aqui" tem um significado único. Ver `ArestaComMais`.
+      const podeInserirAqui = podeEditar && (a.tipo === 'seguinte' || a.tipo === 'ramo')
       return {
         id: a.id,
         source: a.de,
         target: a.para,
-        type: 'smoothstep',
+        type: 'comMais',
+        data: { alvo: podeInserirAqui ? a.para : null, aoInserir: aoInserirAntes },
         ...(a.rotulo ? { label: a.rotulo } : {}),
         // A volta é tracejada: é o único caminho que anda para trás, e vê-la
         // como as outras faria o fluxo parecer ter dois começos.
@@ -169,19 +272,19 @@ function Tela({ grafo, sel, canais, porEtapa, percorridas, aoSelecionar }: Props
           ...(a.tipo === 'volta' ? { strokeDasharray: '4 3' } : {}),
           ...(temPercurso && !viva ? { opacity: 0.4 } : {}),
         },
-        labelStyle: { fill: 'var(--color-tinta-2)', fontSize: 11 },
-        labelBgStyle: { fill: 'var(--color-fundo)' },
       }
     })
 
     return { nos, arestas }
-  }, [grafo, sel, canais, porEtapa, percorridas])
+  }, [grafo, sel, canais, porEtapa, percorridas, podeEditar, aoInserirAntes])
 
   return (
     <ReactFlow
+      className="group/canvas"
       nodes={nos}
       edges={arestas}
       nodeTypes={tiposDeNo}
+      edgeTypes={tiposDeAresta}
       onNodeClick={(_, n) => aoSelecionar(n.id)}
       // Nada de religar: as arestas vêm da árvore.
       nodesDraggable={false}

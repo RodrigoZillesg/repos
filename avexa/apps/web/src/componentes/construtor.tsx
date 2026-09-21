@@ -16,6 +16,7 @@ import {
 } from '@avexa/core'
 import { Simulacao } from '@/componentes/simulacao'
 import { CanvasFluxo } from '@/componentes/canvas-fluxo'
+import { BuscadorDeEtapas } from '@/componentes/buscador-etapas'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
@@ -97,6 +98,10 @@ export function Construtor(p: Props) {
   /** Etapas por onde a última simulação passou. `EventoSimulado.etapaId` sempre
    *  existiu e nunca tinha chegado ao desenho. */
   const [percorridas, setPercorridas] = useState<Set<string>>(new Set())
+  /** Paleta com busca: Ctrl+K, ou o "+" de uma aresta. */
+  const [buscando, setBuscando] = useState(false)
+  /** Onde a próxima etapa entra: antes desta. `null` põe no fim do fluxo. */
+  const [alvoDaInsercao, setAlvoDaInsercao] = useState<string | null>(null)
 
   const selecionada = useMemo(() => (sel ? achar(grafo, sel) : null), [grafo, sel])
 
@@ -189,7 +194,17 @@ export function Construtor(p: Props) {
     const naTela = (ev: KeyboardEvent) => {
       const alvo = ev.target as HTMLElement | null
       if (alvo && /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName)) return
-      if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'z') return
+      if (!(ev.ctrlKey || ev.metaKey)) return
+      const tecla = ev.key.toLowerCase()
+      if (tecla === 'k') {
+        // Ctrl+K, e não Tab como no n8n: sequestrar o Tab quebraria a
+        // navegação por teclado do resto da tela.
+        ev.preventDefault()
+        setAlvoDaInsercao(null)
+        setBuscando(true)
+        return
+      }
+      if (tecla !== 'z') return
       ev.preventDefault()
       if (ev.shiftKey) refazerUmPasso()
       else voltarUmPasso()
@@ -275,6 +290,21 @@ export function Construtor(p: Props) {
             </div>
             {p.podeEditar && (
               <>
+                {/* O atalho fica escrito: ninguém descobre Ctrl+K sozinho. */}
+                <Botao
+                  variante="contorno"
+                  tamanho="pequeno"
+                  onClick={() => {
+                    setAlvoDaInsercao(null)
+                    setBuscando(true)
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Etapa
+                  <kbd className="ml-1 rounded border px-1 text-[10px] text-[var(--color-tinta-3)]">
+                    Ctrl K
+                  </kbd>
+                </Botao>
                 <Botao
                   variante="contorno"
                   tamanho="pequeno"
@@ -328,7 +358,12 @@ export function Construtor(p: Props) {
               canais={p.canais}
               porEtapa={porEtapa}
               percorridas={percorridas}
+              podeEditar={p.podeEditar}
               aoSelecionar={setSel}
+              aoInserirAntes={(alvoId) => {
+                setAlvoDaInsercao(alvoId)
+                setBuscando(true)
+              }}
             />
           </div>
         ) : (
@@ -410,6 +445,14 @@ export function Construtor(p: Props) {
           <p className="text-[13px] text-[var(--color-tinta-3)]">{p.t['fluxos.escolha']}</p>
         )}
       </aside>
+
+      {buscando && (
+        <BuscadorDeEtapas
+          canais={p.canais}
+          aoEscolher={(tipo) => inserir(tipo, alvoDaInsercao ?? undefined)}
+          aoFechar={() => setBuscando(false)}
+        />
+      )}
 
       {simulando && (
         <Simulacao
