@@ -437,7 +437,12 @@ jobs:
           set -euo pipefail
           cd /opt/avexa-motor/app
           compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
-          echo "== números já nossos =="
+          echo "== a conta do Twilio de verdade =="
+          # `|| true` porque o script sai 1 quando há número nosso que não
+          # existe lá. Aqui isso é o relatório, não um portão.
+          compose run --rm worker pnpm --filter @avexa/worker numeros reais || true
+          echo
+          echo "== o que está na nossa tabela =="
           compose run --rm worker pnpm --filter @avexa/worker numeros listar
           REMOTO
 
