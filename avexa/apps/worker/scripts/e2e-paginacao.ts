@@ -11,7 +11,7 @@
  *      pnpm --filter @avexa/worker e2e:paginacao
  */
 import { and, asc, desc, eq, gt, gte, like, lt, or } from 'drizzle-orm'
-import { cliente, db, fluxo, lead, pessoa } from '@avexa/db'
+import { cliente, db, fluxo, lead, pessoa, projeto } from '@avexa/db'
 
 const d = db()
 
@@ -31,9 +31,14 @@ const [c] = await d
   .values({ nome: 'Verificação de paginação', slug: SLUG, fusoHorario: 'Australia/Sydney' })
   .returning()
 
+const [proj] = await d
+  .insert(projeto)
+  .values({ clienteId: c!.id, nome: 'Verificação', slug: 'verif' })
+  .returning()
+
 const [f] = await d
   .insert(fluxo)
-  .values({ clienteId: c!.id, nome: 'Verificação', slug: 'verif' })
+  .values({ clienteId: c!.id, projetoId: proj!.id, nome: 'Verificação', slug: 'verif' })
   .returning()
 
 // 25 leads: 10 com timestamps distintos, 15 empilhados no MESMO instante.

@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm'
-import { clienteCanal, tentativa, type Db } from '@avexa/db'
+import { projetoCanal, tentativa, type Db } from '@avexa/db'
 import type { Canal, FatosContato } from '@avexa/core'
 import { estaSuprimido } from './supressao.ts'
 
@@ -11,7 +11,8 @@ import { estaSuprimido } from './supressao.ts'
  *  regra decidir errado: ou o fato veio errado daqui, ou a regra está errada lá. */
 
 export interface ContextoFatos {
-  clienteId: string
+  /** De onde sai o contato: é o projeto que tem número e canais. */
+  projetoId: string
   execucaoId: string
   pessoaId: string
   canal: Canal
@@ -38,7 +39,7 @@ export async function carregarFatosContato(db: Db, c: ContextoFatos): Promise<Fa
   const [suprimido, respondeu, canal, ultimo] = await Promise.all([
     estaSuprimido(db, { telefone: c.telefone, email: c.email }),
     jaRespondeu(db, c.execucaoId),
-    canalDoCliente(db, c.clienteId, c.canal),
+    canalDoProjeto(db, c.projetoId, c.canal),
     ultimoContatoDaPessoa(db, c.pessoaId),
   ])
 
@@ -68,7 +69,7 @@ async function jaRespondeu(db: Db, execucaoId: string): Promise<boolean> {
   return linhas.length > 0
 }
 
-/** Canais em que cada cliente fala do PRÓPRIO número.
+/** Canais em que cada projeto fala do PRÓPRIO número.
  *
  *  Só telefonia. O WhatsApp sai sempre do número único da Avexa (a Cloud API
  *  manda pelo phoneNumberId da nossa WABA, e não há outro para mandar), e o
@@ -78,9 +79,9 @@ async function jaRespondeu(db: Db, execucaoId: string): Promise<boolean> {
  *  claro, daria mensagem não entregue. */
 const CANAIS_COM_NUMERO_PROPRIO = new Set<Canal>(['sms', 'ligacao'])
 
-export interface CanalDoCliente {
+export interface CanalDoProjeto {
   ativo: boolean
-  /** O número dedicado deste cliente, quando existe e quando o canal é de
+  /** O número dedicado deste projeto, quando existe e quando o canal é de
    *  telefonia. O lead precisa reconhecer quem está ligando, e o SMS tem que
    *  sair do mesmo número da ligação. */
   remetente: string | null
@@ -90,20 +91,26 @@ export interface CanalDoCliente {
   vozId: string | null
 }
 
-/** Estado e ajustes do canal para este cliente.
+/** Estado e ajustes do canal para este PROJETO.
+ *
+ *  É aqui que "o número pertence ao projeto" vira comportamento: o remetente sai
+ *  da frente de trabalho que o fluxo do lead pertence, não do cliente. Um
+ *  cliente com duas escolas tem dois números, e sem isto o motor não teria como
+ *  escolher entre eles — falaria sempre pelo mesmo, e metade dos leads veria o
+ *  telefone da escola errada.
  *
  *  Lê `config` além de `ativo`. A reserva de número na ativação grava
  *  `config.numero` desde sempre; até aqui ninguém lia, e todo cliente acabava
  *  falando pelo número global do .env. */
-export async function canalDoCliente(
+export async function canalDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   canal: Canal,
-): Promise<CanalDoCliente> {
+): Promise<CanalDoProjeto> {
   const [linha] = await db
-    .select({ ativo: clienteCanal.ativo, config: clienteCanal.config })
-    .from(clienteCanal)
-    .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, canal)))
+    .select({ ativo: projetoCanal.ativo, config: projetoCanal.config })
+    .from(projetoCanal)
+    .where(and(eq(projetoCanal.projetoId, projetoId), eq(projetoCanal.canal, canal)))
     .limit(1)
 
   const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)

@@ -33,10 +33,10 @@ export function hubspotConfigurado(): boolean {
   return configHubspotDoAmbiente() !== null && (process.env.APP_SECRET ?? '').length >= 32
 }
 
-export function urlParaConectarHubspot(clienteId: string): string | null {
+export function urlParaConectarHubspot(projetoId: string): string | null {
   const cfg = configHubspotDoAmbiente()
   if (!cfg || !hubspotConfigurado()) return null
-  return urlDeConsentimentoHubspot(cfg, montarState(clienteId, 'hubspot'))
+  return urlDeConsentimentoHubspot(cfg, montarState(projetoId, 'hubspot'))
 }
 
 export interface ResultadoConexaoHubspot {
@@ -48,7 +48,7 @@ export interface ResultadoConexaoHubspot {
 
 export async function concluirConexaoHubspot(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   codigo: string,
 ): Promise<ResultadoConexaoHubspot> {
   const cfg = configHubspotDoAmbiente()
@@ -102,7 +102,7 @@ export async function concluirConexaoHubspot(
 
   await salvarCredenciais(
     db,
-    clienteId,
+    projetoId,
     'hubspot',
     {
       accessToken: cred.accessToken,
@@ -115,10 +115,10 @@ export async function concluirConexaoHubspot(
   return { ok: true, ...(avisos.length > 0 ? { avisos } : {}) }
 }
 
-export async function conexaoHubspot(db: Db, clienteId: string): Promise<Conexao | FalhaConexao> {
+export async function conexaoHubspot(db: Db, projetoId: string): Promise<Conexao | FalhaConexao> {
   const cfg = configHubspotDoAmbiente()
   if (!cfg) return { erro: 'HubSpot não configurado neste ambiente' }
-  return conexaoValida(db, clienteId, 'hubspot', async (refresh) => {
+  return conexaoValida(db, projetoId, 'hubspot', async (refresh) => {
     const r = await renovarHubspot(cfg, refresh)
     if ('erro' in r) return { ok: false, erro: r.erro, ...(r.revogado ? { revogado: true } : {}) }
     return {
@@ -132,10 +132,10 @@ export async function conexaoHubspot(db: Db, clienteId: string): Promise<Conexao
   })
 }
 
-export async function desconectarHubspot(db: Db, clienteId: string): Promise<void> {
+export async function desconectarHubspot(db: Db, projetoId: string): Promise<void> {
   // O HubSpot revoga pelo próprio portal, em Conectados > Apps privados/
   // integrações. Apagamos o que temos de qualquer jeito.
-  await removerIntegracao(db, clienteId, 'hubspot')
+  await removerIntegracao(db, projetoId, 'hubspot')
 }
 
 /* ------------------------------- Pipelines -------------------------------- */
@@ -147,9 +147,9 @@ const FALTA_RECONECTAR =
 
 export async function pipelinesDoCliente(
   db: Db,
-  clienteId: string,
+  projetoId: string,
 ): Promise<PipelineHubspot[] | { erro: string }> {
-  const conexao = await conexaoHubspot(db, clienteId)
+  const conexao = await conexaoHubspot(db, projetoId)
   if ('erro' in conexao) return { erro: conexao.erro }
   if (conexao.config.negociosOk === false) return { erro: FALTA_RECONECTAR }
 
@@ -178,11 +178,11 @@ export const ESTAGIOS_PADRAO: readonly NovoEstagio[] = [
  *  operador, nunca efeito colateral de uma entrega. */
 export async function criarPipelineDoCliente(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   rotulo: string,
   estagios: readonly NovoEstagio[] = ESTAGIOS_PADRAO,
 ): Promise<PipelineHubspot | { erro: string }> {
-  const conexao = await conexaoHubspot(db, clienteId)
+  const conexao = await conexaoHubspot(db, projetoId)
   if ('erro' in conexao) return { erro: conexao.erro }
   if (conexao.config.negociosOk === false) return { erro: FALTA_RECONECTAR }
 

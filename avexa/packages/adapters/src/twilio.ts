@@ -391,3 +391,44 @@ export async function renomearNumero(
   })
   return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao renomear o número' }
 }
+
+export interface PaisDisponivel {
+  /** ISO-3166 alfa-2: AU, US, BR. */
+  iso: string
+  /** Nome do país como o Twilio o escreve, em inglês. */
+  nome: string
+}
+
+export type ResultadoPaises =
+  | { ok: true; paises: PaisDisponivel[] }
+  | { ok: false; erro: string }
+
+/** Países em que ESTA conta pode comprar número.
+ *
+ *  Vem do Twilio e não de uma lista nossa de propósito. A disponibilidade
+ *  depende do cadastro regulatório da conta, e uma lista fixa ofereceria países
+ *  em que a compra falha — o operador escolheria, esperaria, e levaria um erro
+ *  que não é culpa dele. O que a conta não pode comprar não aparece. */
+export async function listarPaisesDisponiveis(
+  cred: CredenciaisTwilio,
+): Promise<ResultadoPaises> {
+  const r = await requisitar(`${base(cred)}/AvailablePhoneNumbers.json?PageSize=200`, {
+    metodo: 'GET',
+    cabecalhos: autorizacao(cred),
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao consultar os países' }
+
+  const lista = (r.corpo as { countries?: unknown[] } | null)?.countries
+  if (!Array.isArray(lista)) return { ok: false, erro: 'resposta do Twilio sem lista de países' }
+
+  const paises = lista
+    .map((x) => {
+      const p = x as Record<string, unknown>
+      return { iso: String(p.country_code ?? ''), nome: String(p.country ?? '') }
+    })
+    .filter((p) => p.iso.length === 2)
+    .sort((a, b) => a.nome.localeCompare(b.nome))
+
+  return { ok: true, paises }
+}

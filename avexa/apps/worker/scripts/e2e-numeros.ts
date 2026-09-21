@@ -57,7 +57,10 @@ if (!ihte) {
 const [p] =
   (await d.select().from(projeto).where(eq(projeto.clienteId, ihte.id)).limit(1)).length > 0
     ? await d.select().from(projeto).where(eq(projeto.clienteId, ihte.id)).limit(1)
-    : await d.insert(projeto).values({ clienteId: ihte.id, nome: 'Sydney CBD' }).returning()
+    : await d
+        .insert(projeto)
+        .values({ clienteId: ihte.id, nome: 'Sydney CBD', slug: 'sydney-cbd' })
+        .returning()
 await d.update(numero).set({ projetoId: p!.id }).where(eq(numero.e164, NOSSO))
 
 const r = await inventarioDeNumeros(d, {

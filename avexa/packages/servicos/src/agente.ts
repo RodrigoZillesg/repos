@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
-import { agenteVoz, cliente, clienteCanal, configGlobal, numero, type Db } from '@avexa/db'
+import { agenteVoz, cliente, configGlobal, numero, projeto, projetoCanal, type Db } from '@avexa/db'
 import {
   atualizarAssistente,
   criarAssistente,
@@ -200,13 +200,17 @@ export type ResultadoAgente =
   | { ok: true; agenteId: string; vapiAssistantId: string | null }
   | { ok: false; erro: string }
 
-/** Cria o agente do cliente no Avexa, a partir do padrão global.
+/** Cria o agente de voz de um PROJETO no Avexa, a partir do padrão global.
+ *
+ *  Por projeto porque é ele que tem número: duas frentes do mesmo cliente
+ *  atendem por telefones diferentes, e cada telefone precisa do seu roteiro.
+ *  Um agente por cliente faria a segunda escola se apresentar como a primeira.
  *
  *  Não fala com a Vapi: guarda a configuração do nosso lado primeiro, para
- *  que uma falha da Vapi não deixe o cliente sem agente nenhum no banco. */
-export async function criarAgenteDoCliente(
+ *  que uma falha da Vapi não deixe o projeto sem agente nenhum no banco. */
+export async function criarAgenteDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   dados: DadosDoCliente,
 ): Promise<ResultadoAgente> {
   const [padrao] = await db.select().from(configGlobal).where(eq(configGlobal.id, 1)).limit(1)
@@ -215,14 +219,14 @@ export async function criarAgenteDoCliente(
   const [existente] = await db
     .select()
     .from(agenteVoz)
-    .where(eq(agenteVoz.clienteId, clienteId))
+    .where(eq(agenteVoz.projetoId, projetoId))
     .limit(1)
   if (existente) return { ok: true, agenteId: existente.id, vapiAssistantId: existente.vapiAssistantId }
 
   const [novo] = await db
     .insert(agenteVoz)
     .values({
-      clienteId,
+      projetoId,
       nome: `Avexa · ${dados.nome}`,
       idioma: dados.idioma,
       modeloProvedor: padrao.vozModeloProvedor,
@@ -285,38 +289,45 @@ export async function publicarAgente(
   return { ok: true, agenteId: a.id, vapiAssistantId: r.id }
 }
 
-/** Leva o número do cliente para a Vapi e o liga ao agente dele.
+/** Leva o número do projeto para a Vapi e o liga ao agente dele.
  *
  *  Comprar no Twilio não basta para voz: a Vapi identifica número por id
- *  próprio. O id volta para `cliente_canal.config.vozId`, que é de onde o
+ *  próprio. O id volta para `projeto_canal.config.vozId`, que é de onde o
  *  motor lê na hora de ligar. */
-export async function importarNumeroDoCliente(
+export async function importarNumeroDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   vapi: CredenciaisVapi,
   twilio: CredenciaisTwilio,
 ): Promise<{ ok: true; vozId: string } | { ok: false; erro: string }> {
   const [linha] = await db
     .select({ e164: numero.e164 })
     .from(numero)
-    .where(and(eq(numero.clienteId, clienteId), eq(numero.provedor, 'twilio')))
+    .where(and(eq(numero.projetoId, projetoId), eq(numero.provedor, 'twilio')))
     .limit(1)
-  if (!linha) return { ok: false, erro: 'este cliente não tem número atribuído' }
+  if (!linha) return { ok: false, erro: 'este projeto não tem número atribuído' }
 
   const [agente] = await db
     .select()
     .from(agenteVoz)
-    .where(eq(agenteVoz.clienteId, clienteId))
+    .where(eq(agenteVoz.projetoId, projetoId))
     .limit(1)
 
-  const [c] = await db.select().from(cliente).where(eq(cliente.id, clienteId)).limit(1)
+  // O apelido na Vapi leva cliente e projeto pelo mesmo motivo do Twilio: a
+  // lista de números lá também vira uma coluna de dígitos sem isso.
+  const [c] = await db
+    .select({ nome: cliente.nome, projeto: projeto.nome })
+    .from(projeto)
+    .innerJoin(cliente, eq(projeto.clienteId, cliente.id))
+    .where(eq(projeto.id, projetoId))
+    .limit(1)
 
   const r = await importarNumeroNaVapi(vapi, {
     e164: linha.e164,
     twilioAccountSid: twilio.accountSid,
     twilioAuthToken: twilio.authToken,
     ...(agente?.vapiAssistantId ? { assistantId: agente.vapiAssistantId } : {}),
-    ...(c ? { apelido: `Avexa · ${c.nome}` } : {}),
+    ...(c ? { apelido: `${c.nome} · ${c.projeto}` } : {}),
   })
   if (!r.ok) return { ok: false, erro: r.erro }
 
@@ -332,16 +343,16 @@ export async function importarNumeroDoCliente(
     .where(eq(numero.e164, linha.e164))
 
   const [canal] = await db
-    .select({ id: clienteCanal.id, config: clienteCanal.config })
-    .from(clienteCanal)
-    .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, 'ligacao')))
+    .select({ id: projetoCanal.id, config: projetoCanal.config })
+    .from(projetoCanal)
+    .where(and(eq(projetoCanal.projetoId, projetoId), eq(projetoCanal.canal, 'ligacao')))
     .limit(1)
 
   if (canal) {
     await db
-      .update(clienteCanal)
+      .update(projetoCanal)
       .set({ config: { ...canal.config, vozId: r.id } })
-      .where(eq(clienteCanal.id, canal.id))
+      .where(eq(projetoCanal.id, canal.id))
   }
 
   return { ok: true, vozId: r.id }

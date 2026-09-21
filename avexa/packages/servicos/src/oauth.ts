@@ -32,7 +32,7 @@ export interface ConfigIntegracao {
   [chave: string]: unknown
 }
 
-const contexto = (clienteId: string, tipo: TipoOAuth) => `${clienteId}:${tipo}`
+const contexto = (projetoId: string, tipo: TipoOAuth) => `${projetoId}:${tipo}`
 
 const NOME: Record<TipoOAuth, string> = {
   google_calendar: 'Google Calendar',
@@ -43,7 +43,7 @@ const NOME: Record<TipoOAuth, string> = {
 
 export async function salvarCredenciais(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoOAuth,
   cred: CredenciaisOAuth,
   extra: Partial<ConfigIntegracao> = {},
@@ -51,7 +51,7 @@ export async function salvarCredenciais(
   const [existente] = await db
     .select()
     .from(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo)))
     .limit(1)
 
   const config: ConfigIntegracao = {
@@ -65,7 +65,7 @@ export async function salvarCredenciais(
   // Só sobrescreve o refresh token quando veio um novo. A renovação costuma
   // devolver o antigo, mas uma resposta sem ele não pode apagar o que temos.
   const segredo = cred.refreshToken
-    ? cifrar(cred.refreshToken, contexto(clienteId, tipo))
+    ? cifrar(cred.refreshToken, contexto(projetoId, tipo))
     : (existente?.segredo ?? null)
 
   if (existente) {
@@ -76,7 +76,7 @@ export async function salvarCredenciais(
   } else {
     await db
       .insert(integracao)
-      .values({ clienteId, tipo, nome: NOME[tipo], config, segredo, ativo: true })
+      .values({ projetoId, tipo, nome: NOME[tipo], config, segredo, ativo: true })
   }
 }
 
@@ -104,7 +104,7 @@ export type Renovador = (refreshToken: string) => Promise<ResultadoRenovacao>
  *  cota do fornecedor. */
 export async function conexaoValida(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoOAuth,
   renovar: Renovador,
 ): Promise<Conexao | FalhaConexao> {
@@ -112,7 +112,7 @@ export async function conexaoValida(
     .select()
     .from(integracao)
     .where(
-      and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo), eq(integracao.ativo, true)),
+      and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo), eq(integracao.ativo, true)),
     )
     .limit(1)
   if (!linha) return { erro: 'integração não conectada', precisaReconectar: true }
@@ -123,7 +123,7 @@ export async function conexaoValida(
     return { accessToken: config.accessToken, config, integracaoId: linha.id }
   }
 
-  const refresh = decifrar(linha.segredo, contexto(clienteId, tipo))
+  const refresh = decifrar(linha.segredo, contexto(projetoId, tipo))
   if (!refresh) {
     await db.update(integracao).set({ ativo: false }).where(eq(integracao.id, linha.id))
     return { erro: 'segredo ilegível — reconecte a conta', precisaReconectar: true }
@@ -138,7 +138,7 @@ export async function conexaoValida(
     return { erro: renovada.erro }
   }
 
-  await salvarCredenciais(db, clienteId, tipo, renovada.cred)
+  await salvarCredenciais(db, projetoId, tipo, renovada.cred)
   const [atualizada] = await db
     .select()
     .from(integracao)
@@ -154,13 +154,13 @@ export async function conexaoValida(
 
 export async function lerConexao(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoOAuth,
 ): Promise<{ ativo: boolean; config: ConfigIntegracao; segredo: string | null } | null> {
   const [linha] = await db
     .select()
     .from(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo)))
     .limit(1)
   if (!linha) return null
   return {
@@ -171,23 +171,23 @@ export async function lerConexao(
 }
 
 export function refreshTokenDe(
-  clienteId: string,
+  projetoId: string,
   tipo: TipoOAuth,
   segredo: string | null,
 ): string | null {
-  return decifrar(segredo, contexto(clienteId, tipo))
+  return decifrar(segredo, contexto(projetoId, tipo))
 }
 
 export async function definirDestino(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoOAuth,
   extra: Partial<ConfigIntegracao>,
 ): Promise<void> {
   const [linha] = await db
     .select()
     .from(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo)))
     .limit(1)
   if (!linha) return
   await db
@@ -196,31 +196,31 @@ export async function definirDestino(
     .where(eq(integracao.id, linha.id))
 }
 
-export async function removerIntegracao(db: Db, clienteId: string, tipo: TipoOAuth): Promise<void> {
+export async function removerIntegracao(db: Db, projetoId: string, tipo: TipoOAuth): Promise<void> {
   await db
     .delete(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo)))
 }
 
 /** `state` assinado do OAuth: diz a qual cliente e a qual integração o retorno
  *  pertence. Sem assinatura, qualquer um poderia induzir o retorno a conectar a
  *  própria conta ao cliente de outra pessoa. */
-export function montarState(clienteId: string, tipo: TipoOAuth): string {
-  return assinar(JSON.stringify({ clienteId, tipo, em: Date.now() }))
+export function montarState(projetoId: string, tipo: TipoOAuth): string {
+  return assinar(JSON.stringify({ projetoId, tipo, em: Date.now() }))
 }
 
 const TIPOS: readonly TipoOAuth[] = ['google_calendar', 'google_sheets', 'calendly', 'hubspot']
 
-export function lerState(state: string | null): { clienteId: string; tipo: TipoOAuth } | null {
+export function lerState(state: string | null): { projetoId: string; tipo: TipoOAuth } | null {
   const valor = conferirAssinatura(state)
   if (!valor) return null
   try {
-    const o = JSON.parse(valor) as { clienteId?: string; tipo?: string; em?: number }
-    if (!o.clienteId || !TIPOS.includes(o.tipo as TipoOAuth)) return null
+    const o = JSON.parse(valor) as { projetoId?: string; tipo?: string; em?: number }
+    if (!o.projetoId || !TIPOS.includes(o.tipo as TipoOAuth)) return null
     // Dez minutos: o consentimento é uma conversa curta, e um state velho
     // reaproveitado é um replay.
     if (!o.em || Date.now() - o.em > 10 * 60_000) return null
-    return { clienteId: o.clienteId, tipo: o.tipo as TipoOAuth }
+    return { projetoId: o.projetoId, tipo: o.tipo as TipoOAuth }
   } catch {
     return null
   }

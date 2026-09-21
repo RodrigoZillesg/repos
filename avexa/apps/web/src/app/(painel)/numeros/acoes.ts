@@ -1,7 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { auditoria, db } from '@avexa/db'
+import { eq } from 'drizzle-orm'
+import { auditoria, db, projeto } from '@avexa/db'
 import {
   adotarNumero,
   credenciaisDoAmbiente,
@@ -58,8 +59,7 @@ export async function renomearNumeroAcao(
 export async function adotarNumeroAcao(
   sid: string,
   e164: string,
-  clienteId: string,
-  projetoId: string | null,
+  projetoId: string,
   capacidades: string[],
 ): Promise<ResultadoNumero> {
   const s = await exigirAdmin()
@@ -71,14 +71,20 @@ export async function adotarNumeroAcao(
   const r = await adotarNumero(
     db(),
     c.cred,
-    { sid, e164, clienteId, capacidades, ...(projetoId ? { projetoId } : {}) },
+    { sid, e164, projetoId, capacidades },
     webhookDeSms(),
   )
   if (!r.ok) return r
 
+  const [dono] = await db()
+    .select({ clienteId: projeto.clienteId })
+    .from(projeto)
+    .where(eq(projeto.id, projetoId))
+    .limit(1)
+
   await db().insert(auditoria).values({
     usuarioId: s.usuarioId,
-    clienteId,
+    ...(dono ? { clienteId: dono.clienteId } : {}),
     acao: 'numero.adotar',
     entidade: 'numero',
     entidadeId: sid,

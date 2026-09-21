@@ -2,7 +2,6 @@ import 'server-only'
 import { and, asc, desc, eq, gt, gte, inArray, lt, or } from 'drizzle-orm'
 import {
   cliente,
-  clienteCanal,
   db,
   entrega,
   execucao,
@@ -11,12 +10,20 @@ import {
   integracao,
   lead,
   numero,
+  projeto,
+  projetoCanal,
   reuniao,
   supressao,
   template,
   tentativa,
 } from '@avexa/db'
 import { CORTE_QUALIFICADO, type Grafo } from '@avexa/core'
+import {
+  listarNumerosDaConta,
+  listarPaisesDisponiveis,
+  type PaisDisponivel,
+} from '@avexa/adapters'
+import { credenciaisDoAmbiente } from '@avexa/servicos'
 import {
   POR_PAGINA,
   cursorParaTexto,
@@ -38,16 +45,87 @@ export async function listarClientes(s: Sessao) {
   return db().select().from(cliente).orderBy(cliente.nome)
 }
 
+export interface NumeroLivre {
+  e164: string
+  capacidades: string[]
+  /** O nome do número no Twilio. É a única coisa que diz de onde ele veio, e
+   *  sem isso a lista de escolha é uma coluna de dígitos indistinguíveis. */
+  apelido: string | null
+}
+
 /** Números livres, para a ativação oferecer "usar um que já temos".
  *
- *  Só quem administra vê: número livre é recurso da operação, não do cliente. */
-export async function numerosLivres(s: Sessao) {
+ *  Só quem administra vê: número livre é recurso da operação, não do cliente.
+ *
+ *  O nome vem do Twilio a cada carga, e a falha é silenciosa de propósito: não
+ *  conseguir ler o nome de um número não pode impedir alguém de ativar um
+ *  cliente. Sem nome, a lista ainda mostra o número. */
+export async function numerosLivres(s: Sessao): Promise<NumeroLivre[]> {
   if (!s.permissoes.administrar) return []
-  return db()
+  const livres = await db()
     .select({ e164: numero.e164, capacidades: numero.capacidades })
     .from(numero)
     .where(eq(numero.status, 'livre'))
     .orderBy(numero.e164)
+  if (livres.length === 0) return []
+
+  const cred = credenciaisDoAmbiente()
+  if (!cred) return livres.map((n) => ({ ...n, apelido: null }))
+
+  const r = await listarNumerosDaConta(cred)
+  const nomes = r.ok ? new Map(r.numeros.map((n) => [n.e164, n.apelido])) : new Map()
+  return livres.map((n) => ({ ...n, apelido: nomes.get(n.e164) || null }))
+}
+
+/** Países em que a conta do Twilio pode comprar número.
+ *
+ *  Lista vazia quando o Twilio não está configurado ou não respondeu; a tela
+ *  então pede a sigla à mão em vez de não deixar comprar. */
+export async function paisesParaComprar(s: Sessao): Promise<PaisDisponivel[]> {
+  if (!s.permissoes.administrar) return []
+  const cred = credenciaisDoAmbiente()
+  if (!cred) return []
+  const r = await listarPaisesDisponiveis(cred)
+  return r.ok ? r.paises : []
+}
+
+/** As frentes de um cliente, para o seletor de projeto das telas. */
+export async function listarProjetosDoCliente(clienteId: string) {
+  return db()
+    .select({
+      id: projeto.id,
+      nome: projeto.nome,
+      slug: projeto.slug,
+      dryRun: projeto.dryRun,
+      ativo: projeto.ativo,
+    })
+    .from(projeto)
+    .where(eq(projeto.clienteId, clienteId))
+    .orderBy(projeto.criadoEm)
+}
+
+/** A frente escolhida na URL, ou a primeira do cliente.
+ *
+ *  Toda tela de operação é de um projeto, porque é ele que tem número, canais,
+ *  templates e destino. Cair na primeira quando a URL não diz nada evita a tela
+ *  vazia de quem só tem uma frente — que é o caso comum. */
+export async function projetoPadrao(clienteId: string, slug?: string) {
+  const d = db()
+  if (slug) {
+    const [p] = await d
+      .select()
+      .from(projeto)
+      .where(and(eq(projeto.clienteId, clienteId), eq(projeto.slug, slug)))
+      .limit(1)
+    if (p) return p
+  }
+  const [p] = await d
+    .select()
+    .from(projeto)
+    .where(eq(projeto.clienteId, clienteId))
+    .orderBy(projeto.criadoEm)
+    .limit(1)
+  return p ?? null
 }
 
 export async function clientePadrao(s: Sessao, slug?: string) {
@@ -65,11 +143,11 @@ export async function clientePadrao(s: Sessao, slug?: string) {
   return c ?? null
 }
 
-export async function canaisDoCliente(clienteId: string) {
+export async function canaisDoProjeto(projetoId: string) {
   const linhas = await db()
     .select()
-    .from(clienteCanal)
-    .where(eq(clienteCanal.clienteId, clienteId))
+    .from(projetoCanal)
+    .where(eq(projetoCanal.projetoId, projetoId))
   return Object.fromEntries(linhas.map((l) => [l.canal, l.ativo])) as Record<string, boolean>
 }
 
@@ -79,15 +157,15 @@ export async function canaisDoCliente(clienteId: string) {
  *  Lê da configuração salva, não do Google: abrir o construtor não deve depender
  *  de a conta do cliente estar respondendo agora. Quem atualiza essa lista é a
  *  tela de Integrações, que é onde a escolha é feita. */
-export async function agendasDoCliente(
-  clienteId: string,
+export async function agendasDoProjeto(
+  projetoId: string,
 ): Promise<Array<{ id: string; nome: string }>> {
   const [linha] = await db()
     .select({ config: integracao.config })
     .from(integracao)
     .where(
       and(
-        eq(integracao.clienteId, clienteId),
+        eq(integracao.projetoId, projetoId),
         eq(integracao.tipo, 'google_calendar'),
         eq(integracao.ativo, true),
       ),
@@ -100,8 +178,8 @@ export async function agendasDoCliente(
   return ids.map((id) => ({ id, nome: nomes[id] ?? id }))
 }
 
-export async function listarFluxos(clienteId: string) {
-  return db().select().from(fluxo).where(eq(fluxo.clienteId, clienteId)).orderBy(fluxo.criadoEm)
+export async function listarFluxos(projetoId: string) {
+  return db().select().from(fluxo).where(eq(fluxo.projetoId, projetoId)).orderBy(fluxo.criadoEm)
 }
 
 export async function carregarFluxo(fluxoId: string) {
@@ -120,7 +198,7 @@ export async function carregarFluxo(fluxoId: string) {
   return { fluxo: f, versao: v ?? null, grafo: (v?.grafo ?? []) as Grafo }
 }
 
-export async function listarTemplates(clienteId: string, canal?: string) {
+export async function listarTemplates(projetoId: string, canal?: string) {
   const d = db()
   return d
     .select()
@@ -128,11 +206,11 @@ export async function listarTemplates(clienteId: string, canal?: string) {
     .where(
       canal
         ? and(
-            eq(template.clienteId, clienteId),
+            eq(template.projetoId, projetoId),
             eq(template.canal, canal as 'email'),
             eq(template.arquivado, false),
           )
-        : and(eq(template.clienteId, clienteId), eq(template.arquivado, false)),
+        : and(eq(template.projetoId, projetoId), eq(template.arquivado, false)),
     )
     .orderBy(template.nome)
 }
@@ -686,4 +764,17 @@ export async function resumoDeLeads(
     entregues: par(distintos(noPeriodo(entregas)), distintos(noAnterior(entregas))),
     total: noPeriodo(leads).length,
   }
+}
+
+/** Quantas frentes do cliente ainda estão em modo seco.
+ *
+ *  As telas de leads e monitor olham o cliente inteiro, e o modo seco agora é
+ *  por projeto: dizer só "modo seco" com duas frentes, uma delas já contatando
+ *  de verdade, seria mentira nos dois sentidos. O número diz qual é o caso. */
+export async function frentesEmSeco(clienteId: string): Promise<{ secas: number; total: number }> {
+  const linhas = await db()
+    .select({ dryRun: projeto.dryRun })
+    .from(projeto)
+    .where(eq(projeto.clienteId, clienteId))
+  return { secas: linhas.filter((l) => l.dryRun).length, total: linhas.length }
 }

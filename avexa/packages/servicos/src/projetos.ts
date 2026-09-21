@@ -1,5 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
-import { numero, projeto, type Db } from '@avexa/db'
+import { numero, projeto, projetoCanal, type Db } from '@avexa/db'
+import { paraSlug } from './provisionamento.ts'
 
 /** Frentes de trabalho dentro de um cliente.
  *
@@ -15,6 +16,9 @@ import { numero, projeto, type Db } from '@avexa/db'
 export interface Projeto {
   id: string
   nome: string
+  /** Segmento do meio da URL de webhook. Não muda depois de criado. */
+  slug: string
+  dryRun: boolean
   ativo: boolean
   /** Quantos números falam por esta frente. Zero significa que o projeto ainda
    *  não tem voz própria. */
@@ -38,13 +42,15 @@ export async function listarProjetos(db: Db, clienteId: string): Promise<Projeto
     .select({
       id: projeto.id,
       nome: projeto.nome,
+      slug: projeto.slug,
+      dryRun: projeto.dryRun,
       ativo: projeto.ativo,
       numeros: sql<number>`count(${numero.id})::int`,
     })
     .from(projeto)
     .leftJoin(numero, eq(numero.projetoId, projeto.id))
     .where(eq(projeto.clienteId, clienteId))
-    .groupBy(projeto.id, projeto.nome, projeto.ativo, projeto.criadoEm)
+    .groupBy(projeto.id, projeto.nome, projeto.slug, projeto.dryRun, projeto.ativo, projeto.criadoEm)
     .orderBy(asc(projeto.criadoEm))
   return linhas
 }
@@ -78,7 +84,28 @@ export async function criarProjeto(
     return { ok: false, erro: `este cliente já tem um projeto chamado "${nome}"` }
   }
 
-  const [novo] = await db.insert(projeto).values({ clienteId, nome }).returning({ id: projeto.id })
+  // O slug entra na URL de webhook e não muda depois: renomear o projeto mexe
+  // no que as pessoas leem, nunca no endereço que o cliente já colou.
+  const base = paraSlug(nome)
+  const usados = new Set(
+    (await db.select({ slug: projeto.slug }).from(projeto).where(eq(projeto.clienteId, clienteId)))
+      .map((x) => x.slug),
+  )
+  let slug = base
+  for (let i = 2; usados.has(slug); i++) slug = `${base}-${i}`
+
+  const [novo] = await db
+    .insert(projeto)
+    .values({ clienteId, nome, slug })
+    .returning({ id: projeto.id })
+
+  // Os quatro canais nascem desligados, como na ativação: o projeto existe
+  // antes de contratar nada, e uma linha faltando faria a tela mostrar menos
+  // canais do que o cliente pode ligar.
+  for (const canal of ['ligacao', 'whatsapp', 'sms', 'email'] as const) {
+    await db.insert(projetoCanal).values({ projetoId: novo!.id, canal, ativo: false })
+  }
+
   return { ok: true, id: novo!.id }
 }
 

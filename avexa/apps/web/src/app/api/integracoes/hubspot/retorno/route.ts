@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   const codigo = url.searchParams.get('code')
   if (!codigo) return volta('erro=sem-codigo')
 
-  const r = await concluirConexaoHubspot(db(), estado.clienteId, codigo)
+  const r = await concluirConexaoHubspot(db(), estado.projetoId, codigo)
   if (!r.ok) return volta(`erro=${encodeURIComponent(r.erro ?? 'falhou')}`)
   return volta(
     r.avisos?.length

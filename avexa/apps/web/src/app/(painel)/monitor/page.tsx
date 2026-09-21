@@ -2,7 +2,13 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
-import { canaisDoCliente, clientePadrao, listarClientes, resumoMonitor } from '@/lib/dados'
+import {
+  canaisDoProjeto,
+  clientePadrao,
+  frentesEmSeco,
+  listarClientes,
+  resumoMonitor,
+} from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 import {
   BarrasBloqueio,
@@ -44,9 +50,11 @@ export default async function PaginaMonitor({
   const clientes = await listarClientes(s)
   const cli = await clientePadrao(s, q.cliente)
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
+  const seco = await frentesEmSeco(cli.id)
+  if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
   const m = await resumoMonitor(s, cli.id)
-  const ativos = await canaisDoCliente(cli.id)
+  const ativos = await canaisDoProjeto(cli.id)
   const contratados = Object.entries(ativos)
     .filter(([, v]) => v)
     .map(([k]) => k)
@@ -63,7 +71,11 @@ export default async function PaginaMonitor({
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">Monitor</h1>
         <span className="text-xs text-[var(--color-tinta-3)]">últimos {m.dias} dias</span>
-        {cli.dryRun && <Selo tom="alerta">modo seco</Selo>}
+        {seco.secas > 0 && (
+          <Selo tom="alerta">
+            {seco.total > 1 ? `modo seco em ${seco.secas} de ${seco.total}` : 'modo seco'}
+          </Selo>
+        )}
       </div>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         {clientes.length > 1 && (

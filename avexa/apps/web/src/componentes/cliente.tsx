@@ -134,23 +134,6 @@ export function Cliente({
           </div>
         </div>
 
-        <label className="mt-4 flex cursor-pointer items-start gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            checked={f.dryRun}
-            disabled={travado}
-            onChange={(e) => campo('dryRun', e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--color-acento)]"
-          />
-          <span>
-            Modo seco
-            <span className="block text-xs text-[var(--color-tinta-3)]">
-              O fluxo roda inteiro e cada tentativa fica gravada, mas nada é enviado. Desligar é o
-              que abre a torneira de verdade.
-            </span>
-          </span>
-        </label>
-
         <div className="mt-4">
           <Botao
             disabled={travado}

@@ -4,7 +4,12 @@ import { eq } from 'drizzle-orm'
 import { db, integracao } from '@avexa/db'
 import { calendlyConfigurado, googleConfigurado, hubspotConfigurado } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
-import { clientePadrao, listarClientes } from '@/lib/dados'
+import {
+  clientePadrao,
+  listarClientes,
+  listarProjetosDoCliente,
+  projetoPadrao,
+} from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 import { Integracoes, type EstadoCliente } from '@/componentes/integracoes'
 import {
@@ -38,7 +43,13 @@ const MENSAGEM: Record<string, string> = {
 export default async function PaginaIntegracoes({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string; erro?: string; conectado?: string; aviso?: string }>
+  searchParams: Promise<{
+    cliente?: string
+    projeto?: string
+    erro?: string
+    conectado?: string
+    aviso?: string
+  }>
 }) {
   const s = await sessaoAtual()
   if (!s) redirect('/entrar')
@@ -49,8 +60,18 @@ export default async function PaginaIntegracoes({
   const cli = await clientePadrao(s, q.cliente)
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
+  // Agenda e CRM são do projeto: cada frente marca na agenda do time dela e
+  // grava no funil dela.
+  const [projetos, proj] = await Promise.all([
+    listarProjetosDoCliente(cli.id),
+    projetoPadrao(cli.id, q.projeto),
+  ])
+  if (!proj) {
+    return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Este cliente não tem projeto.</p>
+  }
+
   const d = db()
-  const linhas = await d.select().from(integracao).where(eq(integracao.clienteId, cli.id))
+  const linhas = await d.select().from(integracao).where(eq(integracao.projetoId, proj.id))
 
   const cfg = (tipo: string): Record<string, unknown> => {
     const linha = linhas.find((l) => l.tipo === tipo && l.ativo)
@@ -59,6 +80,7 @@ export default async function PaginaIntegracoes({
   const conectada = (tipo: string) => linhas.some((l) => l.tipo === tipo && l.ativo)
 
   const estado: EstadoCliente = {
+    projetoId: proj.id,
     clienteId: cli.id,
     provedorEscolhido: (cli.provedorAgenda as EstadoCliente['provedorEscolhido']) ?? null,
     googleConfigurado: googleConfigurado(),

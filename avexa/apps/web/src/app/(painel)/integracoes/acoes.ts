@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
-import { auditoria, cliente, db, integracao } from '@avexa/db'
+import { auditoria, cliente, db, integracao, projeto } from '@avexa/db'
 import {
   entregarWebhook,
   type AgendaDoGoogle,
@@ -10,7 +10,7 @@ import {
 } from '@avexa/adapters'
 import {
   definirDestino,
-  definirWebhookDoCliente,
+  definirWebhookDoProjeto,
   desconectarCalendly,
   desconectarGoogle,
   desconectarHubspot,
@@ -18,7 +18,7 @@ import {
   listarAgendasDoCliente,
   listarTiposDeEvento,
   pipelinesDoCliente,
-  webhookDoCliente,
+  webhookDoProjeto,
   type TipoGoogle,
   type TipoOAuth,
 } from '@avexa/servicos'
@@ -32,24 +32,24 @@ async function exigirAdmin() {
 
 export type TipoIntegracao = TipoOAuth | 'webhook' | 'email_time'
 
-export async function desligar(clienteId: string, tipo: TipoIntegracao): Promise<{ ok: boolean }> {
+export async function desligar(projetoId: string, tipo: TipoIntegracao): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
-  if (tipo === 'calendly') await desconectarCalendly(db(), clienteId)
-  else if (tipo === 'hubspot') await desconectarHubspot(db(), clienteId)
+  if (tipo === 'calendly') await desconectarCalendly(db(), projetoId)
+  else if (tipo === 'hubspot') await desconectarHubspot(db(), projetoId)
   else if (tipo === 'webhook' || tipo === 'email_time') {
-    await db().delete(integracao).where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, tipo)))
-  } else await desconectarGoogle(db(), clienteId, tipo as TipoGoogle)
+    await db().delete(integracao).where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, tipo)))
+  } else await desconectarGoogle(db(), projetoId, tipo as TipoGoogle)
   revalidatePath('/integracoes')
   return { ok: true }
 }
 
 export async function salvarStatusHubspot(
-  clienteId: string,
+  projetoId: string,
   qualificado: string,
   naoQualificado: string,
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
-  await definirDestino(db(), clienteId, 'hubspot', {
+  await definirDestino(db(), projetoId, 'hubspot', {
     statusQualificado: qualificado || null,
     statusNaoQualificado: naoQualificado || null,
   })
@@ -60,10 +60,10 @@ export async function salvarStatusHubspot(
 /* ------------------------- Pipelines do HubSpot --------------------------- */
 
 export async function buscarPipelines(
-  clienteId: string,
+  projetoId: string,
 ): Promise<{ pipelines: PipelineHubspot[] } | { erro: string }> {
   if (!(await exigirAdmin())) return { erro: 'sem permissão' }
-  const r = await pipelinesDoCliente(db(), clienteId)
+  const r = await pipelinesDoCliente(db(), projetoId)
   return 'erro' in r ? r : { pipelines: r }
 }
 
@@ -72,14 +72,14 @@ export async function buscarPipelines(
  *  Estágio em branco quer dizer "não abrir negócio". É a saída para o cliente
  *  que não quer o lead frio entrando no funil dele. */
 export async function salvarFunilHubspot(
-  clienteId: string,
+  projetoId: string,
   pipeline: string,
   estagioQualificado: string,
   estagioNaoQualificado: string,
   nome = '',
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
-  await definirDestino(db(), clienteId, 'hubspot', {
+  await definirDestino(db(), projetoId, 'hubspot', {
     pipeline: pipeline || null,
     // O nome, para a tela abrir dizendo em qual funil o lead cai sem precisar
     // buscar no HubSpot: o id sozinho é um número que não significa nada.
@@ -97,22 +97,30 @@ export async function salvarFunilHubspot(
  *  com quem pediu. Um pipeline a mais não some sozinho: alguém do cliente vai
  *  encontrá-lo lá e perguntar de onde veio. */
 export async function criarPipeline(
-  clienteId: string,
+  projetoId: string,
   nome: string,
 ): Promise<{ ok: true; pipeline: PipelineHubspot } | { ok: false; erro: string }> {
   const s = await exigirAdmin()
   if (!s) return { ok: false, erro: 'sem permissão' }
 
-  const r = await criarPipelineDoCliente(db(), clienteId, nome)
+  const r = await criarPipelineDoCliente(db(), projetoId, nome)
   if ('erro' in r) return { ok: false, erro: r.erro }
+
+  // A auditoria continua por cliente: é o eixo em que se lê histórico. O
+  // projeto entra no detalhe, e o cliente sai dele.
+  const [dono] = await db()
+    .select({ clienteId: projeto.clienteId })
+    .from(projeto)
+    .where(eq(projeto.id, projetoId))
+    .limit(1)
 
   await db().insert(auditoria).values({
     usuarioId: s.usuarioId,
-    clienteId,
+    ...(dono ? { clienteId: dono.clienteId } : {}),
     acao: 'hubspot.pipeline.criar',
     entidade: 'integracao',
     entidadeId: r.id,
-    detalhe: { nome: r.rotulo, estagios: r.estagios.map((x) => x.rotulo) },
+    detalhe: { projetoId, nome: r.rotulo, estagios: r.estagios.map((x) => x.rotulo) },
   })
 
   revalidatePath('/integracoes')
@@ -121,12 +129,12 @@ export async function criarPipeline(
 
 /** Salva a URL do webhook. O segredo volta uma vez e não é mostrado de novo. */
 export async function salvarWebhook(
-  clienteId: string,
+  projetoId: string,
   url: string,
   regerar: boolean,
 ): Promise<{ ok: boolean; segredo?: string; erro?: string }> {
   if (!(await exigirAdmin())) return { ok: false, erro: 'sem permissão' }
-  const r = await definirWebhookDoCliente(db(), clienteId, url.trim(), regerar)
+  const r = await definirWebhookDoProjeto(db(), projetoId, url.trim(), regerar)
   revalidatePath('/integracoes')
   return r
 }
@@ -136,10 +144,10 @@ export async function salvarWebhook(
  *  Vale mais do que parece: quase toda integração de cliente quebra na primeira
  *  entrega real, e descobrir isso com um lead quente na mão é caro. */
 export async function testarWebhook(
-  clienteId: string,
+  projetoId: string,
 ): Promise<{ ok: boolean; status: number; erro?: string }> {
   if (!(await exigirAdmin())) return { ok: false, status: 0, erro: 'sem permissão' }
-  const alvo = await webhookDoCliente(db(), clienteId)
+  const alvo = await webhookDoProjeto(db(), projetoId)
   if (!alvo) return { ok: false, status: 0, erro: 'webhook sem URL' }
 
   const entregaId = `teste-${Date.now()}`
@@ -173,7 +181,7 @@ export async function testarWebhook(
 }
 
 export async function salvarEmailTime(
-  clienteId: string,
+  projetoId: string,
   para: string,
 ): Promise<{ ok: boolean; erro?: string }> {
   if (!(await exigirAdmin())) return { ok: false, erro: 'sem permissão' }
@@ -186,7 +194,7 @@ export async function salvarEmailTime(
   const [linha] = await d
     .select()
     .from(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, 'email_time')))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, 'email_time')))
     .limit(1)
 
   if (linha) {
@@ -196,7 +204,7 @@ export async function salvarEmailTime(
       .where(eq(integracao.id, linha.id))
   } else {
     await d.insert(integracao).values({
-      clienteId,
+      projetoId,
       tipo: 'email_time',
       nome: 'Time comercial',
       config: { para: endereco },
@@ -213,14 +221,14 @@ export async function salvarEmailTime(
  *  sequência ilegível, e sem o nome a tela mostraria ao operador algo que ele
  *  não reconhece como sendo o time do cliente dele. */
 export async function salvarAgendas(
-  clienteId: string,
+  projetoId: string,
   calendarios: string[],
   rodizio: boolean,
   nomes: Record<string, string> = {},
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
   const ids = [...new Set(calendarios.map((x) => x.trim()).filter(Boolean))]
-  await definirDestino(db(), clienteId, 'google_calendar', {
+  await definirDestino(db(), projetoId, 'google_calendar', {
     calendarios: ids,
     // Só os nomes do que ficou escolhido: guardar o resto seria uma cópia da
     // conta Google do cliente envelhecendo aqui dentro.
@@ -233,15 +241,15 @@ export async function salvarAgendas(
 
 /** Lista as agendas da conta conectada, para a tela oferecer escolha. */
 export async function buscarAgendas(
-  clienteId: string,
+  projetoId: string,
 ): Promise<{ agendas: AgendaDoGoogle[] } | { erro: string }> {
   if (!(await exigirAdmin())) return { erro: 'sem permissão' }
-  const r = await listarAgendasDoCliente(db(), clienteId)
+  const r = await listarAgendasDoCliente(db(), projetoId)
   return 'erro' in r ? r : { agendas: r }
 }
 
 export async function salvarPlanilha(
-  clienteId: string,
+  projetoId: string,
   planilhaId: string,
   aba: string,
 ): Promise<{ ok: boolean }> {
@@ -249,7 +257,7 @@ export async function salvarPlanilha(
   // Aceita a URL inteira: ninguém guarda o id de cabeça, e pedir só o id
   // garante que alguém vai colar a URL e ver "não funcionou".
   const id = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(planilhaId)?.[1] ?? planilhaId.trim()
-  await definirDestino(db(), clienteId, 'google_sheets', { planilhaId: id, aba: aba.trim() || 'Leads' })
+  await definirDestino(db(), projetoId, 'google_sheets', { planilhaId: id, aba: aba.trim() || 'Leads' })
   revalidatePath('/integracoes')
   return { ok: true }
 }
@@ -260,13 +268,13 @@ export async function salvarPlanilha(
  *  e "aula demonstrativa de 60" são escolhas diferentes, e conferir qual está
  *  valendo não deveria exigir uma ida ao Calendly. */
 export async function salvarTipoDeEvento(
-  clienteId: string,
+  projetoId: string,
   tipoDeEvento: string,
   nome?: string,
   duracaoMin?: number,
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
-  await definirDestino(db(), clienteId, 'calendly', {
+  await definirDestino(db(), projetoId, 'calendly', {
     tipoDeEvento,
     ...(nome ? { tipoDeEventoNome: nome } : {}),
     ...(duracaoMin ? { tipoDeEventoDuracao: duracaoMin } : {}),
@@ -276,21 +284,21 @@ export async function salvarTipoDeEvento(
 }
 
 export async function buscarTiposDeEvento(
-  clienteId: string,
+  projetoId: string,
 ): Promise<{ tipos: Array<{ uri: string; nome: string; duracaoMin: number }> } | { erro: string }> {
   if (!(await exigirAdmin())) return { erro: 'sem permissão' }
-  const r = await listarTiposDeEvento(db(), clienteId)
+  const r = await listarTiposDeEvento(db(), projetoId)
   if ('erro' in r) return r
   return { tipos: r.map((t) => ({ uri: t.uri, nome: t.nome, duracaoMin: t.duracaoMin })) }
 }
 
 /** Qual ferramenta de agenda este cliente usa, quando as duas estão conectadas. */
 export async function escolherProvedorAgenda(
-  clienteId: string,
+  projetoId: string,
   provedor: ProvedorAgenda,
 ): Promise<{ ok: boolean }> {
   if (!(await exigirAdmin())) return { ok: false }
-  await db().update(cliente).set({ provedorAgenda: provedor }).where(eq(cliente.id, clienteId))
+  await db().update(cliente).set({ provedorAgenda: provedor }).where(eq(cliente.id, projetoId))
   revalidatePath('/integracoes')
   return { ok: true }
 }

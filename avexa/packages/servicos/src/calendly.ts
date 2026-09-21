@@ -22,15 +22,15 @@ export function calendlyConfigurado(): boolean {
   return configCalendlyDoAmbiente() !== null && (process.env.APP_SECRET ?? '').length >= 32
 }
 
-export function urlParaConectarCalendly(clienteId: string): string | null {
+export function urlParaConectarCalendly(projetoId: string): string | null {
   const cfg = configCalendlyDoAmbiente()
   if (!cfg || !calendlyConfigurado()) return null
-  return urlDeConsentimentoCalendly(cfg, montarState(clienteId, 'calendly'))
+  return urlDeConsentimentoCalendly(cfg, montarState(projetoId, 'calendly'))
 }
 
 export async function concluirConexaoCalendly(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   codigo: string,
 ): Promise<{ ok: boolean; erro?: string }> {
   const cfg = configCalendlyDoAmbiente()
@@ -42,7 +42,7 @@ export async function concluirConexaoCalendly(
     return { ok: false, erro: 'O Calendly não devolveu um token de longa duração.' }
   }
 
-  await salvarCredenciais(db, clienteId, 'calendly', {
+  await salvarCredenciais(db, projetoId, 'calendly', {
     accessToken: cred.accessToken,
     refreshToken: cred.refreshToken,
     expiraEm: cred.expiraEm,
@@ -51,10 +51,10 @@ export async function concluirConexaoCalendly(
   return { ok: true }
 }
 
-export async function conexaoCalendly(db: Db, clienteId: string): Promise<Conexao | FalhaConexao> {
+export async function conexaoCalendly(db: Db, projetoId: string): Promise<Conexao | FalhaConexao> {
   const cfg = configCalendlyDoAmbiente()
   if (!cfg) return { erro: 'Calendly não configurado neste ambiente' }
-  return conexaoValida(db, clienteId, 'calendly', async (refresh) => {
+  return conexaoValida(db, projetoId, 'calendly', async (refresh) => {
     const r = await renovarCalendly(cfg, refresh)
     if ('erro' in r) return { ok: false, erro: r.erro, ...(r.revogado ? { revogado: true } : {}) }
     return {
@@ -69,18 +69,18 @@ export async function conexaoCalendly(db: Db, clienteId: string): Promise<Conexa
   })
 }
 
-export async function desconectarCalendly(db: Db, clienteId: string): Promise<void> {
+export async function desconectarCalendly(db: Db, projetoId: string): Promise<void> {
   // O Calendly não expõe endpoint de revogação de token; o cliente remove o
   // acesso em Integrations na conta dele. Apagamos o que temos de qualquer jeito.
-  await removerIntegracao(db, clienteId, 'calendly')
+  await removerIntegracao(db, projetoId, 'calendly')
 }
 
 /** Tipos de evento disponíveis, para o operador escolher qual o fluxo oferece. */
 export async function listarTiposDeEvento(
   db: Db,
-  clienteId: string,
+  projetoId: string,
 ): Promise<TipoDeEvento[] | { erro: string }> {
-  const conexao = await conexaoCalendly(db, clienteId)
+  const conexao = await conexaoCalendly(db, projetoId)
   if ('erro' in conexao) return { erro: conexao.erro }
 
   const usuario = conexao.config.usuario as string | undefined

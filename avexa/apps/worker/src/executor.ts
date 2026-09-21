@@ -114,6 +114,7 @@ export async function avancarExecucao(amb: Ambiente, execucaoId: string): Promis
         seco,
         lead: ld,
         clienteId: cli.id,
+        projetoId: ex.projetoId,
         clienteNome: cli.nome,
         fluxoId: ex.fluxoId,
         agora,
@@ -146,6 +147,7 @@ export async function avancarExecucao(amb: Ambiente, execucaoId: string): Promis
         lead: ld,
         clienteNome: cli.nome,
         clienteId: cli.id,
+        projetoId: ex.projetoId,
         execucaoId,
         seco,
         limites,
@@ -199,6 +201,9 @@ interface PedidoContato {
   seco: boolean
   lead: typeof tLead.$inferSelect
   clienteId: string
+  /** De onde o contato sai: número, canais e templates são do projeto, e a
+   *  execução carrega o dele congelado desde o nascimento. */
+  projetoId: string
   clienteNome: string
   fluxoId: string
   agora: Date
@@ -215,12 +220,12 @@ async function executarContato(amb: Ambiente, p: PedidoContato): Promise<Resulta
 
   // Template é resolvido antes da decisão, porque "template não aprovado" é um
   // dos motivos de bloqueio que as regras conhecem.
-  const modelo = await carregarTemplate(amb, p.clienteId, p.canal, p.etapa.cfg.template)
+  const modelo = await carregarTemplate(amb, p.projetoId, p.canal, p.etapa.cfg.template)
   const exigeTemplate =
     p.canal === 'whatsapp' ? p.etapa.cfg.modo !== 'Conversa livre (janela aberta)' : p.canal !== 'ligacao'
 
   const { fatos, remetente, vozId } = await carregarFatosContato(db, {
-    clienteId: p.clienteId,
+    projetoId: p.projetoId,
     execucaoId: p.execucaoId,
     pessoaId: p.lead.pessoaId,
     canal: p.canal,
@@ -394,13 +399,13 @@ function opcoesDoCanal(
   return {}
 }
 
-async function carregarTemplate(amb: Ambiente, clienteId: string, canal: Canal, nome?: string) {
+async function carregarTemplate(amb: Ambiente, projetoId: string, canal: Canal, nome?: string) {
   if (!nome) return null
   const [t] = await amb.db
     .select()
     .from(tTemplate)
     .where(
-      and(eq(tTemplate.clienteId, clienteId), eq(tTemplate.canal, canal), eq(tTemplate.nome, nome)),
+      and(eq(tTemplate.projetoId, projetoId), eq(tTemplate.canal, canal), eq(tTemplate.nome, nome)),
     )
     .limit(1)
   return t ?? null
@@ -412,6 +417,8 @@ interface PedidoAcao {
   lead: typeof tLead.$inferSelect
   clienteNome: string
   clienteId: string
+  /** Onde estão as conexões de agenda e os destinos de entrega desta frente. */
+  projetoId: string
   execucaoId: string
   seco: boolean
   limites: LimitesMotor
@@ -456,6 +463,7 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       const r = await entregarLead(amb, {
         leadId: p.lead.id,
         clienteId: p.clienteId,
+        projetoId: p.projetoId,
         execucaoId: p.execucaoId,
         etapaId: p.etapa.id,
         destino: p.etapa.cfg.destino ?? 'Webhook do cliente',
@@ -477,6 +485,7 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
       const r = await dispararWebhookSaida(amb, {
         leadId: p.lead.id,
         clienteId: p.clienteId,
+        projetoId: p.projetoId,
         execucaoId: p.execucaoId,
         etapaId: p.etapa.id,
         url: p.etapa.cfg.url ?? '',
@@ -507,6 +516,7 @@ async function executarAcao(amb: Ambiente, p: PedidoAcao): Promise<void> {
 
       const r = await oferecerReuniao(amb.db, {
         clienteId: p.clienteId,
+        projetoId: p.projetoId,
         leadId: p.lead.id,
         execucaoId: p.execucaoId,
         titulo: `${p.clienteNome} · conversa com ${p.lead.nome ?? 'lead'}`,
@@ -611,6 +621,10 @@ async function executarSubfluxo(
     .values({
       leadId: ex.leadId,
       clienteId: ex.clienteId,
+      // O subfluxo roda no projeto do fluxo chamado, não no de quem chamou:
+      // é dele que sai o número, e um subfluxo de outra frente falaria pelo
+      // telefone errado.
+      projetoId: alvo.projetoId,
       fluxoId: alvo.id,
       fluxoVersaoId: alvo.versaoPublicadaId,
       posicao: [{ indice: 0 }],

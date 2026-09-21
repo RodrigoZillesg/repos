@@ -7,7 +7,7 @@ import {
   entregarNoHubspot,
   registrarEntrega,
   registrarNaPlanilha,
-  webhookDoCliente,
+  webhookDoProjeto,
   type CargaLead,
   type DestinoEntrega,
   type RegistroEntrega,
@@ -23,7 +23,10 @@ import type { Ambiente } from './contexto.ts'
 
 export interface PedidoEntrega {
   leadId: string
+  /** Dono do registro de entrega, como o lead. */
   clienteId: string
+  /** Onde estão os destinos: cada frente entrega no funil e no e-mail dela. */
+  projetoId: string
   execucaoId?: string
   etapaId?: string
   destino: string
@@ -89,7 +92,7 @@ export async function entregarLead(amb: Ambiente, p: PedidoEntrega): Promise<Res
     .from(tIntegracao)
     .where(
       and(
-        eq(tIntegracao.clienteId, p.clienteId),
+        eq(tIntegracao.projetoId, p.projetoId),
         eq(tIntegracao.tipo, destino),
         eq(tIntegracao.ativo, true),
       ),
@@ -105,7 +108,7 @@ export async function entregarLead(amb: Ambiente, p: PedidoEntrega): Promise<Res
   const cfg = (conf.config ?? {}) as Record<string, string>
 
   if (destino === 'webhook') {
-    const alvo = await webhookDoCliente(amb.db, p.clienteId)
+    const alvo = await webhookDoProjeto(amb.db, p.projetoId)
     if (!alvo) {
       const erro = 'webhook do cliente sem URL'
       await registrar({ estado: 'sem_destino', erro })
@@ -161,7 +164,7 @@ export async function entregarLead(amb: Ambiente, p: PedidoEntrega): Promise<Res
   }
 
   if (destino === 'hubspot') {
-    const r = await entregarNoHubspot(amb.db, p.clienteId, ld, carga)
+    const r = await entregarNoHubspot(amb.db, p.projetoId, ld, carga)
     await registrar({
       estado: r.ok ? 'entregue' : 'falhou',
       externoId: r.externoId,
@@ -173,7 +176,7 @@ export async function entregarLead(amb: Ambiente, p: PedidoEntrega): Promise<Res
   }
 
   const utm = carga.utm
-  const r = await registrarNaPlanilha(amb.db, p.clienteId, [
+  const r = await registrarNaPlanilha(amb.db, p.projetoId, [
     carga.criadoEm,
     ld.nome,
     ld.telefone,
@@ -206,6 +209,7 @@ function textoDoEmail(c: CargaLead): string {
 export interface PedidoWebhookSaida {
   leadId: string
   clienteId: string
+  projetoId: string
   execucaoId?: string
   etapaId?: string
   url: string
@@ -255,7 +259,7 @@ export async function dispararWebhookSaida(
         ? { id: carga.id, score: carga.score, resumo: carga.resumo, etiquetas: carga.etiquetas }
         : carga
 
-  const alvo = await webhookDoCliente(amb.db, p.clienteId)
+  const alvo = await webhookDoProjeto(amb.db, p.projetoId)
   const entregaId = randomUUID()
   const r = await entregarWebhook({
     url: p.url,

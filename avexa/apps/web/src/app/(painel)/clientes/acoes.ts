@@ -8,6 +8,7 @@ import {
   definirCanal,
   renomearProjeto,
   salvarCliente,
+  salvarProjeto,
   type CadastroDoCliente,
   type ResultadoCanal,
   type ResultadoProjeto,
@@ -157,5 +158,36 @@ export async function arquivarProjetoAcao(
 
   revalidatePath('/clientes')
   revalidatePath('/numeros')
+  return r
+}
+
+/** Liga e desliga o modo seco de uma frente.
+ *
+ *  Fica em auditoria porque é a chave que decide se uma IA liga para gente de
+ *  verdade. Por projeto: desligar o seco de uma escola não abre a torneira da
+ *  outra, e era isso que acontecia quando a chave era do cliente. */
+export async function alternarSecoAcao(
+  clienteId: string,
+  projetoId: string,
+  nome: string,
+  dryRun: boolean,
+): Promise<ResultadoCanal> {
+  const s = await exigirAdmin()
+  if (!s) return { ok: false, erro: 'sem permissão' }
+
+  const r = await salvarProjeto(db(), projetoId, { nome, dryRun })
+  if (!r.ok) return r
+
+  await db().insert(auditoria).values({
+    usuarioId: s.usuarioId,
+    clienteId,
+    acao: dryRun ? 'projeto.seco.ligar' : 'projeto.seco.desligar',
+    entidade: 'projeto',
+    entidadeId: projetoId,
+    detalhe: { nome, por: s.email },
+  })
+
+  revalidatePath('/clientes')
+  revalidatePath('/fluxos')
   return r
 }

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
-import { entrega, integracao, lead as tLead, reuniao, type Db, type Lead } from '@avexa/db'
+import { entrega, fluxo, integracao, lead as tLead, reuniao, type Db, type Lead } from '@avexa/db'
 import { CORTE_QUALIFICADO } from '@avexa/core'
 import {
   criarNota,
@@ -11,6 +11,21 @@ import {
   type DesfechoReuniao,
 } from '@avexa/adapters'
 import { cifrar, decifrar } from './cripto.ts'
+
+/** A frente de trabalho por onde este lead entrou.
+ *
+ *  O lead guarda o cliente e o fluxo; o projeto sai do fluxo. Não há coluna
+ *  própria no lead de propósito: ela poderia divergir do fluxo, e a divergência
+ *  mandaria o lead para o CRM da outra escola sem nenhum erro aparecer. */
+export async function projetoDoLead(db: Db, leadId: string): Promise<string | null> {
+  const [l] = await db
+    .select({ projetoId: fluxo.projetoId })
+    .from(tLead)
+    .innerJoin(fluxo, eq(tLead.fluxoId, fluxo.id))
+    .where(eq(tLead.id, leadId))
+    .limit(1)
+  return l?.projetoId ?? null
+}
 import { conexaoHubspot, funilParaGravar, statusParaGravar } from './hubspot.ts'
 
 /** Entrega do lead onde o cliente trabalha.
@@ -142,7 +157,7 @@ export async function entregasDoLead(db: Db, leadId: string) {
 
 /* ------------------------------- webhook -------------------------------- */
 
-const CTX_WEBHOOK = (clienteId: string) => `${clienteId}:webhook`
+const CTX_WEBHOOK = (projetoId: string) => `${projetoId}:webhook`
 
 /** https na internet; http só em localhost.
  *
@@ -163,9 +178,9 @@ export function urlDeWebhookValida(url: string): boolean {
  *
  *  O segredo é nosso para gerar, não do cliente para inventar: um segredo que
  *  alguém escolhe à mão costuma ser curto e reutilizado. */
-export async function definirWebhookDoCliente(
+export async function definirWebhookDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   url: string,
   regerarSegredo = false,
 ): Promise<{ ok: boolean; segredo?: string; erro?: string }> {
@@ -176,12 +191,12 @@ export async function definirWebhookDoCliente(
   const [existente] = await db
     .select()
     .from(integracao)
-    .where(and(eq(integracao.clienteId, clienteId), eq(integracao.tipo, 'webhook')))
+    .where(and(eq(integracao.projetoId, projetoId), eq(integracao.tipo, 'webhook')))
     .limit(1)
 
-  const anterior = existente ? decifrar(existente.segredo, CTX_WEBHOOK(clienteId)) : null
+  const anterior = existente ? decifrar(existente.segredo, CTX_WEBHOOK(projetoId)) : null
   const segredo = !anterior || regerarSegredo ? `whsec_${randomBytes(24).toString('hex')}` : anterior
-  const cifrado = cifrar(segredo, CTX_WEBHOOK(clienteId))
+  const cifrado = cifrar(segredo, CTX_WEBHOOK(projetoId))
 
   if (existente) {
     await db
@@ -190,7 +205,7 @@ export async function definirWebhookDoCliente(
       .where(eq(integracao.id, existente.id))
   } else {
     await db.insert(integracao).values({
-      clienteId,
+      projetoId,
       tipo: 'webhook',
       nome: 'Webhook do cliente',
       config: { url },
@@ -202,16 +217,16 @@ export async function definirWebhookDoCliente(
   return { ok: true, segredo }
 }
 
-export async function webhookDoCliente(
+export async function webhookDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
 ): Promise<{ url: string; segredo: string | null } | null> {
   const [linha] = await db
     .select()
     .from(integracao)
     .where(
       and(
-        eq(integracao.clienteId, clienteId),
+        eq(integracao.projetoId, projetoId),
         eq(integracao.tipo, 'webhook'),
         eq(integracao.ativo, true),
       ),
@@ -220,7 +235,7 @@ export async function webhookDoCliente(
   if (!linha) return null
   const url = (linha.config as { url?: string }).url
   if (!url) return null
-  return { url, segredo: decifrar(linha.segredo, CTX_WEBHOOK(clienteId)) }
+  return { url, segredo: decifrar(linha.segredo, CTX_WEBHOOK(projetoId)) }
 }
 
 /* ------------------------------- HubSpot -------------------------------- */
@@ -267,7 +282,10 @@ export async function enviarReuniaoAoCrm(
   const contatoId = contatoConhecido ?? (await contatoNoCrm(db, leadId))
   if (!contatoId) return { ok: true, pulado: true }
 
-  const conexao = await conexaoHubspot(db, l.clienteId)
+  const projetoId = await projetoDoLead(db, l.id)
+  if (!projetoId) return { ok: true, pulado: true }
+
+  const conexao = await conexaoHubspot(db, projetoId)
   if ('erro' in conexao) {
     return { ok: false, erro: conexao.erro, reenviavel: !conexao.precisaReconectar }
   }
@@ -406,11 +424,11 @@ async function enviarNegocioAoCrm(
 /** Grava o lead no CRM do cliente: contato com upsert e a conversa como nota. */
 export async function entregarNoHubspot(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   ld: Lead,
   carga: CargaLead,
 ): Promise<ResultadoDestino> {
-  const conexao = await conexaoHubspot(db, clienteId)
+  const conexao = await conexaoHubspot(db, projetoId)
   if ('erro' in conexao) {
     return { ok: false, erro: conexao.erro, reenviavel: !conexao.precisaReconectar }
   }

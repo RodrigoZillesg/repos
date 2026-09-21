@@ -33,15 +33,15 @@ export function googleConfigurado(): boolean {
   return configGoogleDoAmbiente() !== null && (process.env.APP_SECRET ?? '').length >= 32
 }
 
-export function urlParaConectarGoogle(clienteId: string, tipo: TipoGoogle): string | null {
+export function urlParaConectarGoogle(projetoId: string, tipo: TipoGoogle): string | null {
   const cfg = configGoogleDoAmbiente()
   if (!cfg || !googleConfigurado()) return null
-  return urlDeConsentimento(cfg, ESCOPOS[tipo], montarState(clienteId, tipo))
+  return urlDeConsentimento(cfg, ESCOPOS[tipo], montarState(projetoId, tipo))
 }
 
 export async function concluirConexaoGoogle(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoGoogle,
   codigo: string,
 ): Promise<{ ok: boolean; erro?: string }> {
@@ -59,7 +59,7 @@ export async function concluirConexaoGoogle(
     }
   }
 
-  await salvarCredenciais(db, clienteId, tipo, {
+  await salvarCredenciais(db, projetoId, tipo, {
     accessToken: cred.accessToken,
     refreshToken: cred.refreshToken,
     expiraEm: cred.expiraEm,
@@ -70,12 +70,12 @@ export async function concluirConexaoGoogle(
 
 export async function conexaoGoogle(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   tipo: TipoGoogle,
 ): Promise<Conexao | FalhaConexao> {
   const cfg = configGoogleDoAmbiente()
   if (!cfg) return { erro: 'Google não configurado neste ambiente' }
-  return conexaoValida(db, clienteId, tipo, async (refresh) => {
+  return conexaoValida(db, projetoId, tipo, async (refresh) => {
     const r = await renovarAcesso(cfg, refresh)
     if ('erro' in r) return { ok: false, erro: r.erro, ...(r.revogado ? { revogado: true } : {}) }
     return {
@@ -90,14 +90,14 @@ export async function conexaoGoogle(
   })
 }
 
-export async function desconectarGoogle(db: Db, clienteId: string, tipo: TipoGoogle): Promise<void> {
+export async function desconectarGoogle(db: Db, projetoId: string, tipo: TipoGoogle): Promise<void> {
   const cfg = configGoogleDoAmbiente()
-  const linha = await lerConexao(db, clienteId, tipo)
+  const linha = await lerConexao(db, projetoId, tipo)
   // Revoga no Google também: desligar só aqui deixaria o consentimento ativo na
   // conta do cliente, o que não é o que ele pediu ao clicar em desconectar.
-  const refresh = linha ? refreshTokenDe(clienteId, tipo, linha.segredo) : null
+  const refresh = linha ? refreshTokenDe(projetoId, tipo, linha.segredo) : null
   if (cfg && refresh) await revogar(cfg, refresh)
-  await removerIntegracao(db, clienteId, tipo)
+  await removerIntegracao(db, projetoId, tipo)
 }
 
 /** As agendas que a conta conectada deste cliente enxerga.
@@ -107,9 +107,9 @@ export async function desconectarGoogle(db: Db, clienteId: string, tipo: TipoGoo
  *  configuradas está acessível", com um lead quente esperando. */
 export async function listarAgendasDoCliente(
   db: Db,
-  clienteId: string,
+  projetoId: string,
 ): Promise<AgendaDoGoogle[] | { erro: string }> {
-  const conexao = await conexaoGoogle(db, clienteId, 'google_calendar')
+  const conexao = await conexaoGoogle(db, projetoId, 'google_calendar')
   if ('erro' in conexao) return { erro: conexao.erro }
   return listarAgendas(conexao.accessToken)
 }
@@ -129,10 +129,10 @@ export const CABECALHO_PLANILHA = [
 
 export async function registrarNaPlanilha(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   valores: readonly (string | number | null)[],
 ): Promise<{ ok: boolean; erro?: string }> {
-  const conexao = await conexaoGoogle(db, clienteId, 'google_sheets')
+  const conexao = await conexaoGoogle(db, projetoId, 'google_sheets')
   if ('erro' in conexao) return { ok: false, erro: conexao.erro }
 
   const planilhaId = conexao.config.planilhaId as string | undefined

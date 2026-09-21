@@ -18,6 +18,8 @@ import { sessaoAtual } from '@/lib/auth'
 export interface FormAtivacao {
   nome: string
   slug: string
+  /** Nome da primeira frente de trabalho. Em branco, leva o nome do cliente. */
+  projeto: string
   produto: string
   setor: string
   fusoHorario: string
@@ -81,6 +83,7 @@ export async function ativar(entrada: FormAtivacao): Promise<ResultadoAtivacao> 
   const r = await ativarCliente(db(), {
     nome: entrada.nome.trim(),
     slug: paraSlug(entrada.slug || entrada.nome),
+    ...(entrada.projeto.trim() ? { projeto: entrada.projeto.trim() } : {}),
     produto: entrada.produto.trim(),
     fusoHorario: entrada.fusoHorario,
     canais: entrada.canais as Record<Canal, boolean>,

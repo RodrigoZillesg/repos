@@ -32,13 +32,17 @@ interface Props {
   t: Record<Chave, string>
   aoAtivar: (e: FormAtivacao) => Promise<ResultadoAtivacao>
   /** Números já nossos e sem dono, para reaproveitar em vez de comprar. */
-  numerosLivres: Array<{ e164: string; capacidades: string[] }>
+  numerosLivres: Array<{ e164: string; capacidades: string[]; apelido: string | null }>
+  /** Países em que a conta do Twilio pode comprar. Vazio quando não deu para
+   *  ler a conta; aí a tela pede a sigla à mão em vez de travar a compra. */
+  paises: Array<{ iso: string; nome: string }>
 }
 
-export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
+export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres, paises }: Props) {
   const [form, setForm] = useState<FormAtivacao>({
     nome: '',
     slug: '',
+    projeto: '',
     produto: '',
     setor: '',
     fusoHorario: 'Australia/Sydney',
@@ -46,7 +50,7 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
     canais: { ligacao: true, whatsapp: true, sms: true, email: true },
     fluxosExtras: '',
     // Pool primeiro: reaproveitar não custa nada, e comprar custa todo mês.
-    numeroModo: 'pool',
+    numeroModo: 'existente',
     numeroE164: numerosLivres[0]?.e164 ?? '',
     numeroPais: '',
   })
@@ -90,6 +94,21 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
             onChange={(e) => campo('setor', e.target.value)}
             placeholder="Escola de idiomas"
           />
+        </div>
+        <div className="sm:col-span-2">
+          <Rotulo htmlFor="a-projeto">Primeiro projeto</Rotulo>
+          <Entrada
+            id="a-projeto"
+            value={form.projeto}
+            onChange={(e) => campo('projeto', e.target.value)}
+            placeholder={form.nome ? `${form.nome} — ex.: Sydney CBD` : 'Sydney CBD'}
+          />
+          <Ajuda>
+            A frente de trabalho que vai ter número, canais, agente e fluxos. Um cliente pode ter
+            várias — duas escolas da rede, duas campanhas —, cada uma com o telefone e a
+            configuração dela. É este nome que batiza o número no Twilio. Em branco, leva o nome do
+            cliente.
+          </Ajuda>
         </div>
       </div>
 
@@ -161,18 +180,15 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
           <Rotulo>Número de telefone do cliente</Rotulo>
           <div className="grid gap-1.5">
             {[
+              // Havia duas opções aqui — "usar um que já temos" e "escolher
+              // qual usar" — que faziam a mesma coisa: as duas tiram do pool, e
+              // a primeira só escolhia sozinha. Duas portas para a mesma sala.
               {
-                k: 'pool' as const,
+                k: 'existente' as const,
                 nome: 'Usar um número que já temos',
                 nota: numerosLivres.length
                   ? `${numerosLivres.length} livre${numerosLivres.length > 1 ? 's' : ''}`
                   : 'nenhum livre',
-                desabilitado: numerosLivres.length === 0,
-              },
-              {
-                k: 'existente' as const,
-                nome: 'Escolher qual número usar',
-                nota: 'da lista de livres',
                 desabilitado: numerosLivres.length === 0,
               },
               {
@@ -202,32 +218,66 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres }: Props) {
             ))}
           </div>
 
-          {form.numeroModo === 'existente' && (
-            <Selecao
-              className="mt-2"
-              value={form.numeroE164}
-              onChange={(e) => campo('numeroE164', e.target.value)}
-            >
-              {numerosLivres.map((n) => (
-                <option key={n.e164} value={n.e164}>
-                  {n.e164} · {n.capacidades.join(' + ')}
-                </option>
-              ))}
-            </Selecao>
+          {form.numeroModo === 'existente' && numerosLivres.length > 0 && (
+            <div className="mt-2">
+              <Selecao
+                id="a-numero-livre"
+                value={form.numeroE164}
+                onChange={(e) => campo('numeroE164', e.target.value)}
+              >
+                {numerosLivres.map((n) => (
+                  <option key={n.e164} value={n.e164}>
+                    {/* O nome do Twilio vem junto: sem ele a lista é uma coluna
+                        de dígitos, e ninguém sabe qual número é qual. */}
+                    {n.e164}
+                    {n.apelido ? ` · ${n.apelido}` : ' · sem nome no Twilio'} ·{' '}
+                    {n.capacidades.join(' + ')}
+                  </option>
+                ))}
+              </Selecao>
+              <Ajuda>O nome ao lado é o que está gravado no Twilio.</Ajuda>
+            </div>
           )}
 
           {form.numeroModo === 'comprar' && (
             <div className="mt-2">
-              <Entrada
-                id="a-numero-pais"
-                value={form.numeroPais}
-                onChange={(e) => campo('numeroPais', e.target.value)}
-                placeholder="AU"
-              />
-              <Ajuda>
-                País do número, em duas letras. Em branco, usa o país do fuso do cliente. Ligar de
-                outro país derruba a taxa de resposta.
-              </Ajuda>
+              {paises.length > 0 ? (
+                <>
+                  <Selecao
+                    id="a-numero-pais"
+                    value={form.numeroPais}
+                    onChange={(e) => campo('numeroPais', e.target.value)}
+                  >
+                    <option value="">Mesmo país do cliente</option>
+                    {paises.map((p) => (
+                      <option key={p.iso} value={p.iso}>
+                        {p.nome} ({p.iso})
+                      </option>
+                    ))}
+                  </Selecao>
+                  <Ajuda>
+                    Só aparecem os países em que esta conta do Twilio pode comprar. Ligar de outro
+                    país derruba a taxa de resposta.
+                  </Ajuda>
+                </>
+              ) : (
+                <>
+                  {/* Sem conseguir ler a conta, pedir a sigla é pior mas ainda
+                      deixa comprar. Travar seria pior ainda. */}
+                  <Entrada
+                    id="a-numero-pais"
+                    value={form.numeroPais}
+                    onChange={(e) => campo('numeroPais', e.target.value.toUpperCase())}
+                    maxLength={2}
+                    placeholder="AU"
+                    className="w-20 font-mono"
+                  />
+                  <Ajuda>
+                    Não deu para ler os países da conta do Twilio agora. Informe a sigla de duas
+                    letras, ou deixe em branco para usar o país do cliente.
+                  </Ajuda>
+                </>
+              )}
             </div>
           )}
 

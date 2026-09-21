@@ -10,10 +10,19 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { canalEnum, fluxoStatusEnum, idiomaEnum, templateStatusEnum } from './enums.ts'
-import { cliente, usuario } from './tenancy.ts'
+import { cliente, projeto, usuario } from './tenancy.ts'
 
-/** Um fluxo do cliente. Cada um tem a sua própria URL de entrada — é ela que
- *  entregamos para colar na saída do formulário, no CRM ou onde for. */
+/** Um fluxo de um projeto. Cada um tem a sua própria URL de entrada — é ela que
+ *  entregamos para colar na saída do formulário, no CRM ou onde for.
+ *
+ *  Pendura no projeto, não no cliente, e isso é o que faz o resto funcionar: o
+ *  lead entra por uma URL que nomeia o fluxo, e é o projeto do fluxo que diz de
+ *  qual número sai o contato. Sem este vínculo, um cliente com dois números não
+ *  teria como escolher entre eles.
+ *
+ *  `clienteId` continua aqui, derivado do projeto, porque quase toda consulta do
+ *  painel é por cliente e o join extra apareceria em todas elas. Quem escreve é
+ *  o serviço, a partir do projeto — nunca os dois independentemente. */
 export const fluxo = pgTable(
   'fluxo',
   {
@@ -21,8 +30,12 @@ export const fluxo = pgTable(
     clienteId: uuid()
       .notNull()
       .references(() => cliente.id, { onDelete: 'cascade' }),
+    projetoId: uuid()
+      .notNull()
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     nome: text().notNull(),
-    /** Segundo segmento da URL: hooks.avexa.global/v1/<clienteSlug>/<slug> */
+    /** Terceiro segmento da URL:
+     *  hooks.avexa.global/v1/<clienteSlug>/<projetoSlug>/<slug> */
     slug: text().notNull(),
     status: fluxoStatusEnum().notNull().default('rascunho'),
     /** Aponta para a versão que recebe leads novos. Execução em curso continua
@@ -31,7 +44,13 @@ export const fluxo = pgTable(
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
     atualizadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('fluxo_slug_idx').on(t.clienteId, t.slug)],
+  (t) => [
+    // Único por PROJETO: duas frentes do mesmo cliente querem um "lead-novo"
+    // cada, e exigir "lead-novo-sydney" faria o nome do projeto vazar para
+    // dentro do slug do fluxo.
+    uniqueIndex('fluxo_slug_idx').on(t.projetoId, t.slug),
+    index('fluxo_cliente_idx').on(t.clienteId),
+  ],
 )
 
 /** Versão imutável do grafo. Publicar cria uma versão nova em vez de sobrescrever:
@@ -63,9 +82,9 @@ export const template = pgTable(
   'template',
   {
     id: uuid().primaryKey().defaultRandom(),
-    clienteId: uuid()
+    projetoId: uuid()
       .notNull()
-      .references(() => cliente.id, { onDelete: 'cascade' }),
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     canal: canalEnum().notNull(),
     nome: text().notNull(),
     idioma: idiomaEnum().notNull().default('en'),
@@ -86,5 +105,5 @@ export const template = pgTable(
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
     atualizadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('template_cliente_canal_idx').on(t.clienteId, t.canal)],
+  (t) => [index('template_projeto_canal_idx').on(t.projetoId, t.canal)],
 )

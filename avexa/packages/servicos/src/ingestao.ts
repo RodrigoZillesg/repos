@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { cliente, execucao, fluxo, fluxoVersao, lead, type Db } from '@avexa/db'
+import { cliente, execucao, fluxo, fluxoVersao, lead, projeto, type Db } from '@avexa/db'
 import {
   chaveDedupe,
   duracaoEmMinutos,
@@ -48,10 +48,26 @@ function extrairUtm(dados: Record<string, unknown>): Record<string, string> {
 
 export type ResultadoIngestao =
   | { aceito: true; leadId: string; execucaoId: string }
-  | { aceito: false; motivo: 'fluxo_nao_publicado' | 'lead_velho' | 'duplicado' | 'sem_identificador' | 'cliente_inativo' }
+  | {
+      aceito: false
+      motivo:
+        | 'fluxo_nao_publicado'
+        | 'lead_velho'
+        | 'duplicado'
+        | 'sem_identificador'
+        | 'cliente_inativo'
+        /** URL de dois segmentos num cliente onde dois projetos têm um fluxo com
+         *  este mesmo slug. Recusar é mais honesto do que escolher um: mandar o
+         *  lead para a frente errada o faria ser contatado pelo telefone errado,
+         *  e ninguém descobriria. A URL de três segmentos resolve. */
+        | 'fluxo_ambiguo'
+    }
 
 export interface EntradaWebhook {
   clienteSlug: string
+  /** Segmento do meio da URL nova. Ausente na forma antiga de dois segmentos,
+   *  que continua valendo para não quebrar formulário já publicado. */
+  projetoSlug?: string
   fluxoSlug: string
   dados: Record<string, unknown>
   /** Quando o formulário informa o instante do envio, respeitamos a idade máxima. */
@@ -70,11 +86,32 @@ export async function ingerirLead(
     .limit(1)
   if (!cli || cli.status === 'encerrado') return { aceito: false, motivo: 'cliente_inativo' }
 
-  const [flu] = await db
-    .select()
+  // Com projeto na URL, a busca é exata. Sem ele — a forma antiga, que muitos
+  // formulários já carregam —, procura no cliente inteiro e só aceita se houver
+  // exatamente um fluxo com aquele slug.
+  const achados = await db
+    .select({
+      id: fluxo.id,
+      status: fluxo.status,
+      versaoPublicadaId: fluxo.versaoPublicadaId,
+      projetoId: fluxo.projetoId,
+      dryRun: projeto.dryRun,
+    })
     .from(fluxo)
-    .where(and(eq(fluxo.clienteId, cli.id), eq(fluxo.slug, entrada.fluxoSlug)))
-    .limit(1)
+    .innerJoin(projeto, eq(fluxo.projetoId, projeto.id))
+    .where(
+      entrada.projetoSlug
+        ? and(
+            eq(fluxo.clienteId, cli.id),
+            eq(projeto.slug, entrada.projetoSlug),
+            eq(fluxo.slug, entrada.fluxoSlug),
+          )
+        : and(eq(fluxo.clienteId, cli.id), eq(fluxo.slug, entrada.fluxoSlug)),
+    )
+
+  if (achados.length > 1) return { aceito: false, motivo: 'fluxo_ambiguo' }
+
+  const flu = achados[0]
   if (!flu || flu.status !== 'publicado' || !flu.versaoPublicadaId) {
     return { aceito: false, motivo: 'fluxo_nao_publicado' }
   }
@@ -153,13 +190,17 @@ export async function ingerirLead(
     .values({
       leadId: novo!.id,
       clienteId: cli.id,
+      // Congelado junto com a versão do fluxo: é daqui que sai o telefone de
+      // onde o contato parte, e mover o fluxo de projeto no meio trocaria o
+      // número entre uma tentativa e a seguinte.
+      projetoId: flu.projetoId,
       fluxoId: flu.id,
       fluxoVersaoId: versao.id,
       posicao: [{ indice: 0 }],
       contexto: {},
-      // Herdado do cliente no nascimento: mudar o cliente depois não muda o que
+      // Herdado do projeto no nascimento: mudar o projeto depois não muda o que
       // já está em curso.
-      dryRun: cli.dryRun,
+      dryRun: flu.dryRun,
       cadeia: [flu.id],
     })
     .returning({ id: execucao.id })

@@ -5,6 +5,7 @@ import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
 import {
   clientePadrao,
+  frentesEmSeco,
   listarClientes,
   listarLeads,
   resumoDeLeads,
@@ -54,6 +55,8 @@ export default async function PaginaLeads({
 
   const clientes = await listarClientes(s)
   const cli = await clientePadrao(s, q.cliente)
+  if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
+  const seco = await frentesEmSeco(cli.id)
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
   const periodo = periodoValido(q.dias)
@@ -128,7 +131,11 @@ export default async function PaginaLeads({
             ))}
           </nav>
         )}
-        {cli.dryRun && <Selo tom="alerta">modo seco</Selo>}
+        {seco.secas > 0 && (
+          <Selo tom="alerta">
+            {seco.total > 1 ? `modo seco em ${seco.secas} de ${seco.total}` : 'modo seco'}
+          </Selo>
+        )}
       </div>
 
       {resumo && <ResumoLeads resumo={resumo} periodo={periodo} href={linkDoPeriodo} />}

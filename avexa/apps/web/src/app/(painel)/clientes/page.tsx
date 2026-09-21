@@ -8,6 +8,7 @@ import { Cliente } from '@/componentes/cliente'
 import { Projetos } from '@/componentes/projetos'
 import {
   alternarCanal,
+  alternarSecoAcao,
   arquivarProjetoAcao,
   criarProjetoAcao,
   renomearProjetoAcao,
@@ -81,7 +82,6 @@ export default async function PaginaClientes({
               nome: c.nome,
               fusoHorario: c.fusoHorario,
               pais: c.pais,
-              dryRun: c.dryRun,
             } satisfies CadastroDoCliente
           }
           canais={canais}
@@ -99,6 +99,7 @@ export default async function PaginaClientes({
           aoCriar={criarProjetoAcao}
           aoRenomear={renomearProjetoAcao}
           aoArquivar={arquivarProjetoAcao}
+          aoAlternarSeco={alternarSecoAcao}
         />
       </div>
     </div>

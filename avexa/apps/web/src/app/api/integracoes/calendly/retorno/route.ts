@@ -25,6 +25,6 @@ export async function GET(req: Request) {
   const codigo = url.searchParams.get('code')
   if (!codigo) return volta('erro=sem-codigo')
 
-  const r = await concluirConexaoCalendly(db(), estado.clienteId, codigo)
+  const r = await concluirConexaoCalendly(db(), estado.projetoId, codigo)
   return volta(r.ok ? 'conectado=calendly' : `erro=${encodeURIComponent(r.erro ?? 'falhou')}`)
 }

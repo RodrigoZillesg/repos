@@ -24,17 +24,19 @@ export async function GET(req: Request) {
   if (!s?.permissoes.administrar) return volta('erro=sem-permissao')
 
   const url = new URL(req.url)
-  const clienteId = url.searchParams.get('cliente')
+  // A conexão é do projeto: cada frente marca na agenda e grava no CRM do
+  // time dela.
+  const projetoId = url.searchParams.get('projeto')
   const tipo = url.searchParams.get('tipo')
-  if (!clienteId) return volta('erro=pedido-invalido')
+  if (!projetoId) return volta('erro=pedido-invalido')
 
   const destino =
     tipo === 'calendly'
-      ? urlParaConectarCalendly(clienteId)
+      ? urlParaConectarCalendly(projetoId)
       : tipo === 'hubspot'
-        ? urlParaConectarHubspot(clienteId)
+        ? urlParaConectarHubspot(projetoId)
         : tipo === 'google_calendar' || tipo === 'google_sheets'
-          ? urlParaConectarGoogle(clienteId, tipo as TipoGoogle)
+          ? urlParaConectarGoogle(projetoId, tipo as TipoGoogle)
           : null
 
   if (!destino) return volta('erro=fornecedor-nao-configurado')

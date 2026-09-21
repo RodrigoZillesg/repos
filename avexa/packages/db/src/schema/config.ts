@@ -9,7 +9,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { integracaoTipoEnum } from './enums.ts'
-import { cliente, usuario } from './tenancy.ts'
+import { cliente, projeto, usuario } from './tenancy.ts'
 
 /** Limites de segurança do motor, editáveis pelo admin no painel.
  *
@@ -50,15 +50,19 @@ export const configGlobal = pgTable('config_global', {
   atualizadoPor: uuid().references(() => usuario.id, { onDelete: 'set null' }),
 })
 
-/** Destino de entrega configurado por cliente: HubSpot, Google Calendar, Sheets,
- *  webhook ou e-mail do time. Credenciais ficam cifradas em `segredo`. */
+/** Destino de entrega configurado por PROJETO: HubSpot, Google Calendar, Sheets,
+ *  webhook ou e-mail do time. Credenciais ficam cifradas em `segredo`.
+ *
+ *  Por projeto porque é onde a diferença aparece: duas frentes do mesmo cliente
+ *  caem em pipelines diferentes do CRM e avisam times diferentes. Um destino
+ *  por cliente obrigaria a escola nova a receber o lead da antiga. */
 export const integracao = pgTable(
   'integracao',
   {
     id: uuid().primaryKey().defaultRandom(),
-    clienteId: uuid()
+    projetoId: uuid()
       .notNull()
-      .references(() => cliente.id, { onDelete: 'cascade' }),
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     tipo: integracaoTipoEnum().notNull(),
     nome: text().notNull(),
     config: jsonb().$type<Record<string, unknown>>().notNull().default({}),
@@ -67,7 +71,7 @@ export const integracao = pgTable(
     ativo: boolean().notNull().default(true),
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('integracao_cliente_idx').on(t.clienteId, t.tipo)],
+  (t) => [index('integracao_projeto_idx').on(t.projetoId, t.tipo)],
 )
 
 /** Trilha de auditoria: quem mexeu em quê. Papel designer e copywriter não veem
@@ -103,9 +107,9 @@ export const agenteVoz = pgTable(
   'agente_voz',
   {
     id: uuid().primaryKey().defaultRandom(),
-    clienteId: uuid()
+    projetoId: uuid()
       .notNull()
-      .references(() => cliente.id, { onDelete: 'cascade' }),
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     /** Id do assistente na Vapi. Nulo enquanto ainda não foi publicado lá. */
     vapiAssistantId: text(),
     nome: text().notNull(),
@@ -142,7 +146,7 @@ export const agenteVoz = pgTable(
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('agente_voz_cliente_idx').on(t.clienteId),
+    index('agente_voz_projeto_idx').on(t.projetoId),
     index('agente_voz_vapi_idx').on(t.vapiAssistantId),
   ],
 )

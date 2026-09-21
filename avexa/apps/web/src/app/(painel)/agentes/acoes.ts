@@ -2,11 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
-import { agenteVoz, auditoria, db } from '@avexa/db'
+import { agenteVoz, auditoria, db, projeto } from '@avexa/db'
 import {
   credenciaisDoAmbiente,
   credenciaisVapiDoAmbiente,
-  importarNumeroDoCliente,
+  importarNumeroDoProjeto,
   publicarAgente,
   segredoDoWebhookDeVoz,
   webhookDeLigacao,
@@ -98,13 +98,26 @@ export async function salvarAgente(f: FormAgente): Promise<Resultado> {
 
   // O prompt decide o que uma IA vai dizer a uma pessoa de verdade. Quem mudou
   // e o que mudou fica registrado.
+  // O agente é do projeto; a auditoria continua no eixo do cliente, que é como
+  // se lê histórico. O projeto vai no detalhe.
+  const [dono] = await db()
+    .select({ clienteId: projeto.clienteId })
+    .from(projeto)
+    .where(eq(projeto.id, antes.projetoId))
+    .limit(1)
+
   await db().insert(auditoria).values({
     usuarioId: s.usuarioId,
-    clienteId: antes.clienteId,
+    ...(dono ? { clienteId: dono.clienteId } : {}),
     acao: 'agente.salvar',
     entidade: 'agente_voz',
     entidadeId: f.id,
-    detalhe: { promptAntes: antes.prompt, promptDepois: f.prompt, modelo: f.modelo },
+    detalhe: {
+      projetoId: antes.projetoId,
+      promptAntes: antes.prompt,
+      promptDepois: f.prompt,
+      modelo: f.modelo,
+    },
   })
 
   revalidatePath('/agentes')
@@ -154,7 +167,7 @@ export async function importarNumero(clienteId: string): Promise<Resultado> {
   if (!vapi) return { ok: false, erro: 'VAPI_API_KEY não está configurada no servidor' }
   if (!twilio) return { ok: false, erro: 'as credenciais do Twilio não estão configuradas' }
 
-  const r = await importarNumeroDoCliente(db(), clienteId, vapi, twilio)
+  const r = await importarNumeroDoProjeto(db(), clienteId, vapi, twilio)
   if (!r.ok) return { ok: false, erro: r.erro }
 
   revalidatePath('/agentes')

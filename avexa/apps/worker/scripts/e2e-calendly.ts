@@ -10,7 +10,7 @@
  *  usar quando as duas estão conectadas. */
 import { createHmac } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { cliente, db, integracao } from '@avexa/db'
+import { cliente, db, integracao, projeto } from '@avexa/db'
 import {
   concluirConexaoCalendly,
   concluirConexaoGoogle,
@@ -21,7 +21,7 @@ import {
   ingerirLead,
   listarTiposDeEvento,
   oferecerReuniao,
-  provedorDoCliente,
+  provedorDoProjeto,
   reunioesDoLead,
 } from '@avexa/servicos'
 import { conferirAssinaturaCalendly, interpretarWebhookCalendly } from '@avexa/adapters'
@@ -101,6 +101,18 @@ globalThis.fetch = (async (entrada: string | URL | Request, init?: RequestInit) 
 const d = db()
 const [c] = await d.select().from(cliente).where(eq(cliente.slug, 'ihte')).limit(1)
 if (!c) {
+  console.error('sem o cliente ihte: rode o seed antes')
+  process.exit(1)
+}
+// Destinos e conexões de agenda são do projeto; o registro de entrega continua
+// sendo do cliente. O fixture precisa dos dois.
+const [proj] = await d.select().from(projeto).where(eq(projeto.clienteId, c.id)).limit(1)
+if (!proj) {
+  console.error('o cliente ihte não tem projeto: rode o seed antes')
+  process.exit(1)
+}
+const projetoId = proj.id
+if (!c) {
   console.error('rode o seed antes')
   process.exit(1)
 }
@@ -115,7 +127,7 @@ if (!conexao.ok) problemas.push('a conexão falhou')
 const [linha] = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .then((rs) => rs.filter((r) => r.tipo === 'calendly'))
 
 const segredo = linha?.segredo ?? ''
@@ -154,6 +166,7 @@ if (!entrada.aceito) {
 
 const pedido = {
   clienteId: c.id,
+  projetoId,
   leadId: entrada.leadId,
   execucaoId: entrada.execucaoId,
   titulo: 'Conversa sobre o curso',
@@ -281,11 +294,11 @@ if (semLead.ok) problemas.push('casou uma reunião que não é de lead nenhum')
 await concluirConexaoGoogle(d, c.id, 'google_calendar', 'codigo-do-google')
 await definirDestino(d, c.id, 'google_calendar', { calendarios: ['ana@cliente.com'] })
 
-const semPreferencia = await provedorDoCliente(d, c.id)
+const semPreferencia = await provedorDoProjeto(d, c.id)
 await d.update(cliente).set({ provedorAgenda: 'google_calendar' }).where(eq(cliente.id, c.id))
-const comGoogle = await provedorDoCliente(d, c.id)
+const comGoogle = await provedorDoProjeto(d, c.id)
 await d.update(cliente).set({ provedorAgenda: 'calendly' }).where(eq(cliente.id, c.id))
-const comCalendly = await provedorDoCliente(d, c.id)
+const comCalendly = await provedorDoProjeto(d, c.id)
 console.log(`9. preferência: padrão=${semPreferencia} · google=${comGoogle} · calendly=${comCalendly}`)
 if (semPreferencia !== 'calendly') problemas.push('sem preferência, o Calendly deveria ganhar')
 if (comGoogle !== 'google_calendar') problemas.push('a preferência pelo Google foi ignorada')
@@ -302,13 +315,13 @@ if (!('erro' in depoisDeRevogar) || !depoisDeRevogar.precisaReconectar) {
 const [final] = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .then((rs) => rs.filter((x) => x.tipo === 'calendly'))
 if (final?.ativo) problemas.push('a integração revogada continuou ativa')
 
 // Com o Calendly desligado, a preferência por ele não pode mandar o motor para
 // uma ferramenta que não responde.
-const caiuParaGoogle = await provedorDoCliente(d, c.id)
+const caiuParaGoogle = await provedorDoProjeto(d, c.id)
 console.log(`    provedor após revogação: ${caiuParaGoogle}`)
 if (caiuParaGoogle !== 'google_calendar') {
   problemas.push('com o Calendly revogado, deveria cair para a outra ferramenta conectada')

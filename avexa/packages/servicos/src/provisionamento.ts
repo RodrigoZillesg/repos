@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import {
   cliente,
-  clienteCanal,
   fluxo,
   fluxoVersao,
   integracao,
   numero,
+  projeto,
+  projetoCanal,
   template,
   type Db,
 } from '@avexa/db'
@@ -20,7 +21,7 @@ import {
   type Pais,
 } from '@avexa/core'
 import type { CredenciaisTwilio, CredenciaisVapi } from '@avexa/adapters'
-import { criarAgenteDoCliente, importarNumeroDoCliente, publicarAgente } from './agente.ts'
+import { criarAgenteDoProjeto, importarNumeroDoProjeto, publicarAgente } from './agente.ts'
 import { MODELOS_AVEXA, ROTEIROS_AVEXA } from './modelos.ts'
 import { definirRemetente, provisionarNumero } from './numeros.ts'
 
@@ -60,6 +61,9 @@ export interface OpcoesAtivacao {
 export interface EntradaAtivacao {
   nome: string
   slug: string
+  /** Nome da primeira frente de trabalho. Todo cliente nasce com uma: é ela que
+   *  tem número, canais, agente e fluxos. Em branco, leva o nome do cliente. */
+  projeto?: string
   /** O que o cliente vende. Entra nos templates e no roteiro de voz. */
   produto: string
   setor?: string
@@ -102,8 +106,14 @@ const eid = () => randomUUID().slice(0, 8)
 const etapa = (tipo: string, cfg: Record<string, string>, extra: Record<string, unknown> = {}) =>
   ({ id: eid(), tipo, cfg, ...extra }) as unknown as Etapa
 
-export function urlDeEntrada(clienteSlug: string, fluxoSlug: string): string {
-  return `${BASE_HOOK}/${clienteSlug}/${fluxoSlug}`
+/** A URL que o cliente cola na saída do formulário dele.
+ *
+ *  Três segmentos porque duas frentes do mesmo cliente querem um "lead-novo"
+ *  cada; exigir slug único no cliente faria o nome do projeto vazar para dentro
+ *  do nome do fluxo. A forma de dois segmentos continua sendo aceita na
+ *  entrada, para não quebrar formulário já publicado. */
+export function urlDeEntrada(clienteSlug: string, projetoSlug: string, fluxoSlug: string): string {
+  return `${BASE_HOOK}/${clienteSlug}/${projetoSlug}/${fluxoSlug}`
 }
 
 export function paraSlug(texto: string): string {
@@ -121,7 +131,11 @@ export function paraSlug(texto: string): string {
  *
  *  As esperas só entram entre dois contatos: um fluxo de e-mail único não deve
  *  nascer com uma espera pendurada antes do nada. */
-export function fluxoPadrao(clienteSlug: string, canais: Record<string, boolean>): Grafo {
+export function fluxoPadrao(
+  clienteSlug: string,
+  projetoSlug: string,
+  canais: Record<string, boolean>,
+): Grafo {
   const contatos: Etapa[] = []
   const push = (e: Etapa) => {
     if (contatos.length > 0) {
@@ -156,7 +170,7 @@ export function fluxoPadrao(clienteSlug: string, canais: Record<string, boolean>
 
   return [
     etapa('entrada', {
-      url: urlDeEntrada(clienteSlug, 'lead-novo'),
+      url: urlDeEntrada(clienteSlug, projetoSlug, 'lead-novo'),
       metodo: 'POST (JSON)',
       campos: 'nome, telefone, email',
       utm: 'Sim, todas as utm_*',
@@ -213,19 +227,41 @@ export async function ativarCliente(
       fusoHorario: entrada.fusoHorario,
       pais: paisCliente,
       status: 'ativando',
-      // Nasce em modo seco: o primeiro lead real só sai depois que alguém olhar
-      // o lead de teste e virar a chave de propósito.
-      dryRun: true,
     })
     .returning({ id: cliente.id })
 
   const clienteId = novo!.id
-  marcar(1, 'Cadastrar o cliente', 'feito', `${entrada.nome} · ${entrada.fusoHorario} · modo seco`)
+
+  // Toda ativação cria uma frente de trabalho, mesmo quando o cliente só terá
+  // uma. É nela que ficam número, canais, agente, templates e fluxos — sem ela
+  // o cliente seria uma conta vazia, e a segunda escola exigiria remontar tudo.
+  const nomeProjeto = (entrada.projeto ?? '').trim() || entrada.nome
+  const [proj] = await db
+    .insert(projeto)
+    .values({
+      clienteId,
+      nome: nomeProjeto,
+      slug: paraSlug(nomeProjeto),
+      // Nasce em modo seco: o primeiro lead real só sai depois que alguém olhar
+      // o lead de teste e virar a chave de propósito. Por projeto, para a
+      // segunda frente poder entrar em seco enquanto a primeira já contata.
+      dryRun: true,
+    })
+    .returning({ id: projeto.id, slug: projeto.slug })
+
+  const projetoId = proj!.id
+  const projetoSlug = proj!.slug
+  marcar(
+    1,
+    'Cadastrar o cliente',
+    'feito',
+    `${entrada.nome} · projeto ${nomeProjeto} · ${entrada.fusoHorario} · modo seco`,
+  )
 
   // 2. Canais contratados (as URLs vêm no passo 3, junto com os fluxos).
   const canais = Object.entries(entrada.canais).filter(([, v]) => v).map(([k]) => k as Canal)
   for (const c of ['ligacao', 'whatsapp', 'sms', 'email'] as const) {
-    await db.insert(clienteCanal).values({ clienteId, canal: c, ativo: entrada.canais[c] ?? false })
+    await db.insert(projetoCanal).values({ projetoId, canal: c, ativo: entrada.canais[c] ?? false })
   }
   marcar(
     5,
@@ -254,7 +290,7 @@ export async function ativarCliente(
       const r = await provisionarNumero(
         db,
         opcoes.twilio,
-        { pais: escolha.pais ?? paisCliente, clienteId, apelido: `Avexa · ${entrada.nome}` },
+        { pais: escolha.pais ?? paisCliente, projetoId },
         opcoes.webhookSms ?? null,
       )
       if (r.ok) {
@@ -269,17 +305,17 @@ export async function ativarCliente(
     if (!alvo) {
       marcar(3, 'Número do cliente', 'falhou', `${escolha.e164} não está cadastrado`)
       avisos.push(`O número ${escolha.e164} não existe no sistema. Ligação e SMS não saem.`)
-    } else if (alvo.clienteId && alvo.clienteId !== clienteId) {
-      // Dois clientes no mesmo número misturaria as respostas dos leads: o
-      // webhook só traz o número, não o cliente.
-      marcar(3, 'Número do cliente', 'falhou', `${escolha.e164} já é de outro cliente`)
-      avisos.push(`O número ${escolha.e164} já pertence a outro cliente e não foi reatribuído.`)
+    } else if (alvo.projetoId && alvo.projetoId !== projetoId) {
+      // Dois projetos no mesmo número misturaria as respostas dos leads: o
+      // webhook só traz o número, e não há como saber de qual frente é o lead.
+      marcar(3, 'Número do cliente', 'falhou', `${escolha.e164} já é de outro projeto`)
+      avisos.push(`O número ${escolha.e164} já pertence a outro projeto e não foi reatribuído.`)
     } else {
       await db
         .update(numero)
-        .set({ status: 'atribuido', clienteId })
+        .set({ status: 'atribuido', projetoId })
         .where(eq(numero.id, alvo.id))
-      await definirRemetente(db, clienteId, alvo.e164)
+      await definirRemetente(db, projetoId, alvo.e164)
       const doPais = paisDoTelefone(alvo.e164) === paisCliente
       marcar(
         3,
@@ -299,9 +335,9 @@ export async function ativarCliente(
     if (livre) {
       await db
         .update(numero)
-        .set({ status: 'atribuido', clienteId })
+        .set({ status: 'atribuido', projetoId })
         .where(eq(numero.id, livre.id))
-      await definirRemetente(db, clienteId, livre.e164)
+      await definirRemetente(db, projetoId, livre.e164)
       marcar(
         3,
         'Número do cliente',
@@ -326,7 +362,7 @@ export async function ativarCliente(
   // se a Vapi falhar, o cliente fica com agente configurado e não publicado,
   // que se resolve com um botão — e não sem agente nenhum.
   if (entrada.canais.ligacao) {
-    const agente = await criarAgenteDoCliente(db, clienteId, {
+    const agente = await criarAgenteDoProjeto(db, projetoId, {
       nome: entrada.nome,
       produto: entrada.produto,
       idioma: paisCliente === 'BR' ? 'pt' : 'en',
@@ -349,7 +385,7 @@ export async function ativarCliente(
         // Comprar no Twilio não basta para voz: a Vapi identifica número por
         // id próprio, e é esse id que o motor usa para ligar.
         const imp = opcoes.twilio
-          ? await importarNumeroDoCliente(db, clienteId, opcoes.vapi, opcoes.twilio)
+          ? await importarNumeroDoProjeto(db, projetoId, opcoes.vapi, opcoes.twilio)
           : { ok: false as const, erro: 'sem credenciais do Twilio para importar o número' }
 
         marcar(
@@ -378,7 +414,7 @@ export async function ativarCliente(
   for (const m of MODELOS_AVEXA) {
     if (!entrada.canais[m.canal]) continue
     await db.insert(template).values({
-      clienteId,
+      projetoId,
       canal: m.canal,
       nome: m.nome,
       corpo: m.corpo,
@@ -425,14 +461,14 @@ export async function ativarCliente(
   const nomesFluxo = ['Lead novo do site', ...(entrada.fluxosExtras ?? [])]
   for (const nome of nomesFluxo) {
     const fslug = nome === 'Lead novo do site' ? 'lead-novo' : paraSlug(nome)
-    const grafo = fluxoPadrao(slug, entrada.canais)
+    const grafo = fluxoPadrao(slug, projetoSlug, entrada.canais)
     if (fslug !== 'lead-novo' && grafo[0]) {
-      grafo[0].cfg.url = urlDeEntrada(slug, fslug)
+      grafo[0].cfg.url = urlDeEntrada(slug, projetoSlug, fslug)
     }
 
     const [f] = await db
       .insert(fluxo)
-      .values({ clienteId, nome, slug: fslug, status: 'publicado' })
+      .values({ clienteId, projetoId, nome, slug: fslug, status: 'publicado' })
       .returning({ id: fluxo.id })
     const [v] = await db
       .insert(fluxoVersao)
@@ -440,7 +476,7 @@ export async function ativarCliente(
       .returning({ id: fluxoVersao.id })
     await db.update(fluxo).set({ versaoPublicadaId: v!.id }).where(eq(fluxo.id, f!.id))
 
-    urls.push({ fluxo: nome, url: urlDeEntrada(slug, fslug) })
+    urls.push({ fluxo: nome, url: urlDeEntrada(slug, projetoSlug, fslug) })
   }
   marcar(2, 'Gerar as URLs de entrada', 'feito', `${urls.length} endereço(s), um por fluxo`)
   marcar(8, 'Montar os fluxos', 'feito', `canais no fluxo: ${canais.join(', ') || 'nenhum'}`)
@@ -448,7 +484,7 @@ export async function ativarCliente(
   // Destino de entrega.
   if (entrada.emailDoTime) {
     await db.insert(integracao).values({
-      clienteId,
+      projetoId,
       tipo: 'email_time',
       nome: 'Time comercial',
       config: { para: entrada.emailDoTime },

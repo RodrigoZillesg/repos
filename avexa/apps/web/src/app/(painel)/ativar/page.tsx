@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
-import { listarClientes, numerosLivres } from '@/lib/dados'
+import { listarClientes, numerosLivres, paisesParaComprar } from '@/lib/dados'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 import { Ativacao } from '@/componentes/ativacao'
 import { ativar } from './acoes'
@@ -70,7 +70,11 @@ export default async function PaginaAtivar() {
   if (!s.permissoes.verClientes) redirect('/')
 
   const t = dicionarioDe(s.idioma)
-  const [clientes, livres] = await Promise.all([listarClientes(s), numerosLivres(s)])
+  const [clientes, livres, paises] = await Promise.all([
+    listarClientes(s),
+    numerosLivres(s),
+    paisesParaComprar(s),
+  ])
 
   return (
     <div className="mx-auto w-full max-w-4xl p-6 lg:p-8">
@@ -85,6 +89,7 @@ export default async function PaginaAtivar() {
           t={t}
           aoAtivar={ativar}
           numerosLivres={livres}
+          paises={paises}
         />
       </section>
 
@@ -156,7 +161,6 @@ export default async function PaginaAtivar() {
               <code className="hidden truncate font-mono text-[11px] text-[var(--color-tinta-3)] sm:block">
                 hooks.avexa.global/v1/{c.slug}/…
               </code>
-              {c.dryRun && <Selo tom="alerta">seco</Selo>}
               <Selo tom={c.status === 'ativo' ? 'ok' : 'neutro'}>{c.status}</Selo>
             </li>
           ))}

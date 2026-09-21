@@ -2,10 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, desc, eq } from 'drizzle-orm'
-import { cliente, db, fluxo, fluxoVersao, template } from '@avexa/db'
+import { cliente, db, fluxo, fluxoVersao, projeto, template } from '@avexa/db'
 import { temErro, validarGrafo, type Achado, type Grafo } from '@avexa/core'
 import { sessaoAtual } from '@/lib/auth'
-import { canaisDoCliente, listarFluxos } from '@/lib/dados'
+import { canaisDoProjeto, listarFluxos } from '@/lib/dados'
 
 /** Salva um rascunho ou publica.
  *
@@ -44,16 +44,19 @@ export async function salvarFluxo(
   if (!c) return { ok: false, erro: 'cliente não encontrado' }
 
   if (publicar) {
-    const canais = await canaisDoCliente(c.id)
+    // Canais e templates são da frente a que este fluxo pertence, não do
+    // cliente: publicar um fluxo da escola A não pode validar contra o
+    // WhatsApp que só a escola B contratou.
+    const canais = await canaisDoProjeto(f.projetoId)
     const aprovados = await d
       .select({ canal: template.canal, nome: template.nome })
       .from(template)
-      .where(and(eq(template.clienteId, c.id), eq(template.status, 'aprovado')))
+      .where(and(eq(template.projetoId, f.projetoId), eq(template.status, 'aprovado')))
 
     const porCanal: Record<string, string[]> = {}
     for (const a of aprovados) (porCanal[a.canal] ??= []).push(a.nome)
 
-    const outros = (await listarFluxos(c.id))
+    const outros = (await listarFluxos(f.projetoId))
       .filter((x) => x.id !== fluxoId)
       .map((x) => ({ id: x.id, nome: x.nome }))
     const achados = validarGrafo(grafo, {
@@ -108,7 +111,7 @@ export async function salvarFluxo(
   return { ok: true, ...(avisos.length > 0 ? { achados: avisos } : {}) }
 }
 
-export async function criarFluxo(clienteId: string, nome: string): Promise<{ ok: boolean; id?: string }> {
+export async function criarFluxo(projetoId: string, nome: string): Promise<{ ok: boolean; id?: string }> {
   const s = await sessaoAtual()
   if (!s?.permissoes.editarFluxos) return { ok: false }
 
@@ -121,12 +124,19 @@ export async function criarFluxo(clienteId: string, nome: string): Promise<{ ok:
       .replace(/^-|-$/g, '') || `fluxo-${Date.now()}`
 
   const d = db()
-  const [c] = await d.select().from(cliente).where(eq(cliente.id, clienteId)).limit(1)
-  if (!c) return { ok: false }
+  // A URL de entrada leva cliente e projeto: sem o projeto, duas frentes com um
+  // fluxo de mesmo nome teriam o mesmo endereço.
+  const [p] = await d
+    .select({ clienteId: projeto.clienteId, clienteSlug: cliente.slug, projetoSlug: projeto.slug })
+    .from(projeto)
+    .innerJoin(cliente, eq(projeto.clienteId, cliente.id))
+    .where(eq(projeto.id, projetoId))
+    .limit(1)
+  if (!p) return { ok: false }
 
   const [f] = await d
     .insert(fluxo)
-    .values({ clienteId, nome, slug })
+    .values({ clienteId: p.clienteId, projetoId, nome, slug })
     .returning({ id: fluxo.id })
 
   // Fluxo novo já nasce com entrada e guarda: são as duas etapas que o motor
@@ -139,7 +149,7 @@ export async function criarFluxo(clienteId: string, nome: string): Promise<{ ok:
         id: 'entrada',
         tipo: 'entrada',
         cfg: {
-          url: `https://hooks.avexa.global/v1/${c.slug}/${slug}`,
+          url: `https://hooks.avexa.global/v1/${p.clienteSlug}/${p.projetoSlug}/${slug}`,
           metodo: 'POST (JSON)',
           campos: 'nome, telefone, email',
           utm: 'Sim, todas as utm_*',

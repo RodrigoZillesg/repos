@@ -5,7 +5,7 @@
  *  O passo 9 da própria sequência ("rodar o lead de teste") é o que este arquivo
  *  faz depois de provisionar. */
 import { eq } from 'drizzle-orm'
-import { cliente, db, execucao, numero, template, tentativa } from '@avexa/db'
+import { cliente, db, execucao, numero, projeto, template, tentativa } from '@avexa/db'
 import { ativarCliente, encerrarFila, ingerirLead } from '@avexa/servicos'
 import { adaptadoresDoAmbiente } from '@avexa/adapters'
 import { avancarExecucao } from '../src/executor.ts'
@@ -57,11 +57,14 @@ for (const u of r.urls) console.log(`  ${u.fluxo.padEnd(24)} ${u.url}`)
 
 // O que a ativação deixou de pé.
 const [c] = await d.select().from(cliente).where(eq(cliente.id, r.clienteId!)).limit(1)
-const modelos = await d.select().from(template).where(eq(template.clienteId, r.clienteId!))
-const [voz] = await d.select().from(numero).where(eq(numero.clienteId, r.clienteId!)).limit(1)
+// A ativação cria uma frente de trabalho; é nela que templates e número moram.
+const [proj] = await d.select().from(projeto).where(eq(projeto.clienteId, r.clienteId!)).limit(1)
+const modelos = await d.select().from(template).where(eq(template.projetoId, proj!.id))
+const [voz] = await d.select().from(numero).where(eq(numero.projetoId, proj!.id)).limit(1)
 
 console.log('')
-console.log(`cliente: ${c!.nome} · ${c!.pais} · seco=${c!.dryRun} · status=${c!.status}`)
+console.log(`cliente: ${c!.nome} · ${c!.pais} · status=${c!.status}`)
+console.log(`projeto: ${proj!.nome} (${proj!.slug}) · seco=${proj!.dryRun}`)
 console.log(`templates: ${modelos.map((m) => `${m.canal}/${m.nome}(${m.status})`).join(' ')}`)
 console.log(`número de voz: ${voz?.e164 ?? '—'}`)
 

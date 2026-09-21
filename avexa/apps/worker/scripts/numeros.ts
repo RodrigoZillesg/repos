@@ -11,7 +11,7 @@
  *      pnpm --filter @avexa/worker numeros webhooks
  */
 import { eq } from 'drizzle-orm'
-import { cliente, db, numero } from '@avexa/db'
+import { cliente, db, numero, projeto } from '@avexa/db'
 import { buscarNumerosDisponiveis, type TipoDeNumero } from '@avexa/adapters'
 import {
   credenciaisDoAmbiente,
@@ -25,13 +25,24 @@ const [comando, ...resto] = process.argv.slice(2)
 const d = db()
 
 if (comando === 'listar') {
-  const todos = await d.select().from(numero)
+  const todos = await d
+    .select({
+      e164: numero.e164,
+      status: numero.status,
+      capacidades: numero.capacidades,
+      provedorSid: numero.provedorSid,
+      cliente: cliente.nome,
+      projeto: projeto.nome,
+    })
+    .from(numero)
+    .leftJoin(projeto, eq(numero.projetoId, projeto.id))
+    .leftJoin(cliente, eq(projeto.clienteId, cliente.id))
   if (todos.length === 0) {
     console.log('nenhum número cadastrado')
     process.exit(0)
   }
   for (const n of todos) {
-    const dono = n.clienteId ? `cliente ${n.clienteId.slice(0, 8)}` : 'livre'
+    const dono = n.projeto ? `${n.cliente} · ${n.projeto}` : 'livre'
     console.log(
       `${n.e164}  ${n.status.padEnd(9)} ${dono.padEnd(20)} ${n.capacidades.join('+')}` +
         `${n.provedorSid ? '' : '  (sem SID: comprado fora da plataforma)'}`,

@@ -1,8 +1,12 @@
 import { and, eq } from 'drizzle-orm'
-import { agenteVoz, cliente, clienteCanal, fluxo, fluxoVersao, type Db } from '@avexa/db'
+import { agenteVoz, cliente, fluxo, fluxoVersao, projeto, projetoCanal, type Db } from '@avexa/db'
 import { ETAPAS, type Canal, type Etapa, type Grafo } from '@avexa/core'
 
-/** Ligar e desligar canal de um cliente depois da ativação.
+/** Ligar e desligar canal de um PROJETO depois da ativação.
+ *
+ *  Por projeto porque é ele que tem número próprio: uma frente do cliente pode
+ *  usar SMS e a outra não, e as duas falam de telefones diferentes. Preso ao
+ *  cliente, ligar SMS para uma escola ligava para as duas.
  *
  *  A ativação era a única chance de decidir isso, e não devia ser: cliente
  *  contrata SMS no segundo mês, desiste de ligação, muda de ideia. Mas ligar um
@@ -21,13 +25,13 @@ export interface EstadoCanal {
   /** Dá para ligar agora? Quando `false`, `falta` diz o que resolver. */
   pronto: boolean
   falta: string | null
-  /** O número do cliente, quando o canal usa um. */
+  /** O número do projeto, quando o canal usa um. */
   numero: string | null
   /** Quantos fluxos publicados têm uma etapa deste canal. Desligar cala todos. */
   fluxosPublicados: number
 }
 
-/** Canais cujo contato sai do número do próprio cliente.
+/** Canais cujo contato sai do número do próprio projeto.
  *
  *  WhatsApp e e-mail saem de um remetente único da Avexa — o WhatsApp pela
  *  WABA, o e-mail pelo domínio verificado no Resend. Ligar esses dois é só
@@ -44,13 +48,13 @@ function usaCanal(grafo: Grafo, canal: Canal): boolean {
   return olhar(grafo)
 }
 
-export async function estadoDosCanais(db: Db, clienteId: string): Promise<EstadoCanal[]> {
+export async function estadoDosCanais(db: Db, projetoId: string): Promise<EstadoCanal[]> {
   const [linhas, agente, publicados] = await Promise.all([
-    db.select().from(clienteCanal).where(eq(clienteCanal.clienteId, clienteId)),
+    db.select().from(projetoCanal).where(eq(projetoCanal.projetoId, projetoId)),
     db
       .select({ vapiAssistantId: agenteVoz.vapiAssistantId })
       .from(agenteVoz)
-      .where(eq(agenteVoz.clienteId, clienteId))
+      .where(eq(agenteVoz.projetoId, projetoId))
       .limit(1),
     // Só as versões que estão no ar: um rascunho com etapa de WhatsApp não é
     // motivo para hesitar em desligar o WhatsApp.
@@ -58,7 +62,7 @@ export async function estadoDosCanais(db: Db, clienteId: string): Promise<Estado
       .select({ grafo: fluxoVersao.grafo })
       .from(fluxo)
       .innerJoin(fluxoVersao, eq(fluxo.versaoPublicadaId, fluxoVersao.id))
-      .where(eq(fluxo.clienteId, clienteId)),
+      .where(eq(fluxo.projetoId, projetoId)),
   ])
 
   const porCanal = new Map(linhas.map((l) => [l.canal as Canal, l]))
@@ -77,7 +81,7 @@ export async function estadoDosCanais(db: Db, clienteId: string): Promise<Estado
 
     let falta: string | null = null
     if (PRECISAM_DE_NUMERO.has(canal) && !numero) {
-      falta = 'este cliente não tem número. Atribua um antes de ligar o canal.'
+      falta = 'este projeto não tem número. Atribua um antes de ligar o canal.'
     } else if (canal === 'ligacao' && !agentePublicado) {
       falta = 'o agente de voz ainda não foi publicado na Vapi.'
     } else if (canal === 'ligacao' && !vozNaVapi) {
@@ -108,15 +112,15 @@ export type ResultadoCanal = { ok: true; aviso?: string } | { ok: false; erro: s
  *  acontece na próxima entrada de lead, não na hora do clique. */
 export async function definirCanal(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   canal: Canal,
   ativo: boolean,
 ): Promise<ResultadoCanal> {
   if (!CANAIS.includes(canal)) return { ok: false, erro: `canal desconhecido: ${canal}` }
 
-  const estados = await estadoDosCanais(db, clienteId)
+  const estados = await estadoDosCanais(db, projetoId)
   const estado = estados.find((e) => e.canal === canal)
-  if (!estado) return { ok: false, erro: 'cliente não encontrado' }
+  if (!estado) return { ok: false, erro: 'projeto não encontrado' }
   if (estado.ativo === ativo) return { ok: true }
 
   if (ativo && !estado.pronto) {
@@ -124,17 +128,17 @@ export async function definirCanal(
   }
 
   const [linha] = await db
-    .select({ id: clienteCanal.id })
-    .from(clienteCanal)
-    .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, canal)))
+    .select({ id: projetoCanal.id })
+    .from(projetoCanal)
+    .where(and(eq(projetoCanal.projetoId, projetoId), eq(projetoCanal.canal, canal)))
     .limit(1)
 
   if (linha) {
-    await db.update(clienteCanal).set({ ativo }).where(eq(clienteCanal.id, linha.id))
+    await db.update(projetoCanal).set({ ativo }).where(eq(projetoCanal.id, linha.id))
   } else {
     // Cliente ativado antes deste canal existir não tem a linha. Criar é mais
     // honesto do que falhar: o canal passa a existir desligado por padrão.
-    await db.insert(clienteCanal).values({ clienteId, canal, ativo })
+    await db.insert(projetoCanal).values({ projetoId, canal, ativo })
   }
 
   if (!ativo && estado.fluxosPublicados > 0) {
@@ -153,6 +157,12 @@ export interface CadastroDoCliente {
   nome: string
   fusoHorario: string
   pais: string
+}
+
+export interface CadastroDoProjeto {
+  nome: string
+  /** Executa o fluxo inteiro e grava tudo, sem enviar nada. Fica no projeto
+   *  para dar para virar a torneira de uma frente por vez. */
   dryRun: boolean
 }
 
@@ -180,13 +190,34 @@ export async function salvarCliente(
 
   await db
     .update(cliente)
-    .set({ nome, fusoHorario: d.fusoHorario, pais: d.pais, dryRun: d.dryRun, atualizadoEm: new Date() })
+    .set({ nome, fusoHorario: d.fusoHorario, pais: d.pais, atualizadoEm: new Date() })
     .where(eq(cliente.id, clienteId))
+
+  return { ok: true }
+}
+
+/** O que dá para corrigir num projeto depois da ativação.
+ *
+ *  O modo seco mora aqui e não no cliente porque a virada é por frente: a
+ *  escola nova roda em espelho enquanto a antiga já contata gente de verdade.
+ *  Com isso no cliente, desligar o seco para testar uma abriria a torneira das
+ *  duas de uma vez. */
+export async function salvarProjeto(
+  db: Db,
+  projetoId: string,
+  d: CadastroDoProjeto,
+): Promise<ResultadoCanal> {
+  const nome = d.nome.trim().replace(/\s+/g, ' ')
+  if (!nome) return { ok: false, erro: 'o projeto precisa de um nome' }
+  if (nome.length > 40) return { ok: false, erro: 'o nome do projeto cabe em 40 caracteres' }
+
+  await db.update(projeto).set({ nome, dryRun: d.dryRun }).where(eq(projeto.id, projetoId))
 
   return d.dryRun
     ? { ok: true }
     : {
         ok: true,
-        aviso: 'Modo seco desligado: a partir de agora os contatos saem de verdade.',
+        aviso:
+          'Modo seco desligado neste projeto: a partir de agora os contatos dele saem de verdade.',
       }
 }

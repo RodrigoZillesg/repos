@@ -48,7 +48,7 @@ const agentes = await d
     vapiAssistantId: agenteVoz.vapiAssistantId,
   })
   .from(agenteVoz)
-  .innerJoin(cliente, eq(agenteVoz.clienteId, cliente.id))
+  .innerJoin(cliente, eq(agenteVoz.projetoId, cliente.id))
   // Só quem já está no ar. Agente nunca publicado é rascunho: publicá-lo aqui
   // poria no ar um prompt que ninguém revisou.
   .where(isNotNull(agenteVoz.vapiAssistantId))

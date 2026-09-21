@@ -3,13 +3,15 @@ import Link from 'next/link'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
 import {
-  agendasDoCliente,
-  canaisDoCliente,
+  agendasDoProjeto,
+  canaisDoProjeto,
   carregarFluxo,
   clientePadrao,
   listarClientes,
   listarFluxos,
+  listarProjetosDoCliente,
   listarTemplates,
+  projetoPadrao,
 } from '@/lib/dados'
 import { carregarLimites } from '@avexa/servicos'
 import { db } from '@avexa/db'
@@ -22,7 +24,7 @@ export const dynamic = 'force-dynamic'
 export default async function PaginaFluxos({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string; fluxo?: string }>
+  searchParams: Promise<{ cliente?: string; projeto?: string; fluxo?: string }>
 }) {
   const s = await sessaoAtual()
   if (!s) redirect('/entrar')
@@ -37,16 +39,25 @@ export default async function PaginaFluxos({
     return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente cadastrado.</p>
   }
 
-  const fluxos = await listarFluxos(cli.id)
+  // Fluxos, canais, templates e agendas são todos da frente: a escola A tem os
+  // fluxos dela e os canais dela, e misturar mostraria etapas que o motor
+  // pularia na hora do envio.
+  const projetos = await listarProjetosDoCliente(cli.id)
+  const proj = await projetoPadrao(cli.id, q.projeto)
+  if (!proj) {
+    return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Este cliente não tem projeto.</p>
+  }
+
+  const fluxos = await listarFluxos(proj.id)
   const escolhido = fluxos.find((f) => f.id === q.fluxo) ?? fluxos[0]
   if (!escolhido) {
-    return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Este cliente ainda não tem fluxos.</p>
+    return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Este projeto ainda não tem fluxos.</p>
   }
 
   const carregado = await carregarFluxo(escolhido.id)
-  const canais = await canaisDoCliente(cli.id)
-  const modelos = await listarTemplates(cli.id)
-  const agendas = await agendasDoCliente(cli.id)
+  const canais = await canaisDoProjeto(proj.id)
+  const modelos = await listarTemplates(proj.id)
+  const agendas = await agendasDoProjeto(proj.id)
   const limites = await carregarLimites(db())
 
   const porCanal: Record<string, string[]> = {}
@@ -75,11 +86,30 @@ export default async function PaginaFluxos({
           </select>
         </label>
 
+        {/* Os fluxos são do projeto, então trocar de projeto troca a lista. */}
+        {projetos.length > 1 && (
+          <nav className="flex items-center gap-1">
+            {projetos.map((x) => (
+              <Link
+                key={x.id}
+                href={`/fluxos?cliente=${cli.slug}&projeto=${x.slug}` as '/fluxos'}
+                className={
+                  x.id === proj.id
+                    ? 'rounded-lg border border-[var(--color-acento)] px-2.5 py-1 text-[13px] font-medium text-[var(--color-acento)]'
+                    : 'rounded-lg border px-2.5 py-1 text-[13px] text-[var(--color-tinta-2)]'
+                }
+              >
+                {x.nome}
+              </Link>
+            ))}
+          </nav>
+        )}
+
         <nav className="flex items-center gap-1">
           {fluxos.map((f) => (
             <Link
               key={f.id}
-              href={`/fluxos?cliente=${cli.slug}&fluxo=${f.id}` as '/fluxos'}
+              href={`/fluxos?cliente=${cli.slug}&projeto=${proj.slug}&fluxo=${f.id}` as '/fluxos'}
               className={
                 f.id === escolhido.id
                   ? 'rounded-lg bg-[var(--color-acento-suave)] px-2.5 py-1 text-[13px] font-medium text-[var(--color-acento)]'
@@ -92,12 +122,12 @@ export default async function PaginaFluxos({
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          {cli.dryRun && <Selo tom="alerta">modo seco</Selo>}
+          {proj.dryRun && <Selo tom="alerta">modo seco</Selo>}
           <Selo tom={escolhido.status === 'publicado' ? 'ok' : 'neutro'}>{escolhido.status}</Selo>
         </div>
       </div>
 
-      {cli.dryRun && (
+      {proj.dryRun && (
         <p className="border-b bg-[var(--color-acento-suave)] px-4 py-2 text-xs text-[var(--color-tinta-2)]">
           {t['seco.aviso']}
         </p>

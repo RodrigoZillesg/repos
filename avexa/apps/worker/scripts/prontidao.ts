@@ -9,11 +9,15 @@
  *  Este script responde. Só lê: não liga canal, não publica agente, não manda
  *  lead. É seguro rodar contra produção a qualquer momento.
  *
- *      pnpm --filter @avexa/worker prontidao            # todos os clientes
- *      pnpm --filter @avexa/worker prontidao <slug>     # um só, em detalhe
+ *      pnpm --filter @avexa/worker prontidao            # todos os projetos
+ *      pnpm --filter @avexa/worker prontidao <slug>     # um cliente, em detalhe
+ *
+ *  A unidade é o PROJETO, não o cliente: número, canais, agente e destino são
+ *  dele, e duas frentes do mesmo cliente podem estar em estados opostos — uma
+ *  contatando de verdade e a outra ainda sem telefone.
  */
 import { eq } from 'drizzle-orm'
-import { agenteVoz, cliente, db, fluxo, integracao, numero } from '@avexa/db'
+import { agenteVoz, cliente, db, fluxo, integracao, numero, projeto } from '@avexa/db'
 import { estadoDosCanais } from '@avexa/servicos'
 import { adaptadoresDoAmbiente } from '@avexa/adapters'
 
@@ -50,18 +54,33 @@ console.log('== Fornecedores (valem para todos os clientes) ==')
 const forn = fornecedores()
 for (const l of forn.linhas) console.log(l)
 
-const clientes = await d.select().from(cliente).orderBy(cliente.nome)
-const escolhidos = alvo ? clientes.filter((c) => c.slug === alvo) : clientes
+const frentes = await d
+  .select({
+    projetoId: projeto.id,
+    projetoNome: projeto.nome,
+    projetoSlug: projeto.slug,
+    dryRun: projeto.dryRun,
+    clienteNome: cliente.nome,
+    clienteSlug: cliente.slug,
+    fusoHorario: cliente.fusoHorario,
+    pais: cliente.pais,
+    status: cliente.status,
+  })
+  .from(projeto)
+  .innerJoin(cliente, eq(projeto.clienteId, cliente.id))
+  .orderBy(cliente.nome, projeto.nome)
+
+const escolhidos = alvo ? frentes.filter((c) => c.clienteSlug === alvo) : frentes
 
 if (escolhidos.length === 0) {
-  console.error(alvo ? `\nnenhum cliente com o slug ${alvo}` : '\nnenhum cliente cadastrado')
+  console.error(alvo ? `\nnenhum cliente com o slug ${alvo}` : '\nnenhum projeto cadastrado')
   process.exit(1)
 }
 
 let algumPronto = false
 
 for (const c of escolhidos) {
-  console.log(`\n== ${c.nome} (${c.slug}) ==`)
+  console.log(`\n== ${c.clienteNome} · ${c.projetoNome} (${c.clienteSlug}/${c.projetoSlug}) ==`)
   const pendencias: string[] = []
 
   // 1. Cadastro. O fuso decide a janela de contato e o país decide como um
@@ -76,7 +95,7 @@ for (const c of escolhidos) {
 
   // Os canais são lidos antes porque o passo do número precisa deles: um
   // número de teste só é bloqueio se algum canal depender dele.
-  const canais = await estadoDosCanais(d, c.id)
+  const canais = await estadoDosCanais(d, c.projetoId)
 
   // 2. Número. O mesmo atende voz e SMS.
   //
@@ -87,7 +106,7 @@ for (const c of escolhidos) {
   //    levantar suspeita: aparecem atribuídos, o canal de SMS liga, o fluxo tem
   //    a etapa, e o envio morre no Twilio com um 400. É o mesmo silêncio de
   //    sempre, uma camada abaixo.
-  const [num] = await d.select().from(numero).where(eq(numero.clienteId, c.id)).limit(1)
+  const [num] = await d.select().from(numero).where(eq(numero.projetoId, c.projetoId)).limit(1)
   const precisaDeNumero = canais.filter((x) => x.ativo && x.numero !== null).map((x) => x.canal)
   if (!num) {
     console.log(`${NOTA}sem número — só WhatsApp e e-mail podem ser ligados`)
@@ -125,7 +144,7 @@ for (const c of escolhidos) {
 
   // 4. Agente de voz, só se a ligação estiver contratada.
   if (canais.find((x) => x.canal === 'ligacao')?.ativo) {
-    const [ag] = await d.select().from(agenteVoz).where(eq(agenteVoz.clienteId, c.id)).limit(1)
+    const [ag] = await d.select().from(agenteVoz).where(eq(agenteVoz.projetoId, c.projetoId)).limit(1)
     if (!ag) {
       console.log(`${FALTA}ligação contratada e sem agente de voz`)
       pendencias.push('agente de voz')
@@ -144,7 +163,7 @@ for (const c of escolhidos) {
 
   // 5. Fluxo publicado. Sem ele a URL de webhook aceita o lead e não acontece
   //    nada: a execução não tem o que executar.
-  const fluxos = await d.select().from(fluxo).where(eq(fluxo.clienteId, c.id))
+  const fluxos = await d.select().from(fluxo).where(eq(fluxo.projetoId, c.projetoId))
   const publicados = fluxos.filter((f) => f.versaoPublicadaId)
   if (publicados.length === 0) {
     console.log(`${FALTA}nenhum fluxo publicado (${fluxos.length} rascunho(s))`)
@@ -152,13 +171,15 @@ for (const c of escolhidos) {
   } else {
     console.log(`${OK}${publicados.length} fluxo(s) publicado(s)`)
     for (const f of publicados) {
-      console.log(`${NOTA}  https://${process.env.DOMINIO ?? 'DOMINIO'}/api/hooks/v1/${c.slug}/${f.slug}`)
+      console.log(
+        `${NOTA}  https://${process.env.DOMINIO ?? 'DOMINIO'}/api/hooks/v1/${c.clienteSlug}/${c.projetoSlug}/${f.slug}`,
+      )
     }
   }
 
   // 6. Destino de entrega. Um fluxo impecável que qualifica o lead e não o
   //    entrega em lugar nenhum não serviu para nada.
-  const destinos = await d.select().from(integracao).where(eq(integracao.clienteId, c.id))
+  const destinos = await d.select().from(integracao).where(eq(integracao.projetoId, c.projetoId))
   const ativos = destinos.filter((x) => x.ativo)
   if (ativos.length === 0) {
     console.log(`${FALTA}nenhum destino de entrega conectado (CRM, planilha, webhook ou e-mail)`)
@@ -173,7 +194,7 @@ for (const c of escolhidos) {
     algumPronto = true
     console.log(
       c.dryRun
-        ? `\n  PRONTO para um lead de teste em modo seco. Para contato real, desligue o modo seco em Clientes.`
+        ? `\n  PRONTO para um lead de teste em modo seco. Para contato real, desligue o modo seco deste projeto.`
         : `\n  PRONTO para contato real. Um lead entrando agora é contatado de verdade.`,
     )
   } else {
@@ -184,6 +205,6 @@ for (const c of escolhidos) {
 console.log(
   algumPronto
     ? '\nPara mandar um lead de teste: pnpm --filter @avexa/worker e2e'
-    : '\nNenhum cliente pronto ainda.',
+    : '\nNenhum projeto pronto ainda.',
 )
 process.exit(0)

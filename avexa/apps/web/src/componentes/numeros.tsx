@@ -33,8 +33,7 @@ interface Props {
   aoAdotar: (
     sid: string,
     e164: string,
-    clienteId: string,
-    projetoId: string | null,
+    projetoId: string,
     capacidades: string[],
   ) => Promise<ResultadoNumero>
 }
@@ -111,10 +110,10 @@ export function Numeros({ numeros, clientes, podeAdministrar, aoRenomear, aoAdot
                     mostrar(await aoRenomear(n.sid ?? '', n.e164, apelido), 'Nome trocado no Twilio.'),
                   )
                 }
-                aoAdotar={(clienteId, projetoId) =>
+                aoAdotar={(projetoId) =>
                   iniciar(async () =>
                     mostrar(
-                      await aoAdotar(n.sid ?? '', n.e164, clienteId, projetoId, n.capacidades),
+                      await aoAdotar(n.sid ?? '', n.e164, projetoId, n.capacidades),
                       'Número trazido para a Avexa.',
                     ),
                   )
@@ -145,15 +144,17 @@ function Linha({
   clientes: ClienteDaLista[]
   travado: boolean
   aoRenomear: (apelido: string) => void
-  aoAdotar: (clienteId: string, projetoId: string | null) => void
+  aoAdotar: (projetoId: string) => void
 }) {
   const [editando, setEditando] = useState(false)
   const [nome, setNome] = useState(n.apelido)
   const [adotando, setAdotando] = useState(false)
   const [clienteId, setClienteId] = useState(clientes[0]?.id ?? '')
-  const [projetoId, setProjetoId] = useState('')
 
+  // O número pertence ao projeto, não ao cliente: o seletor de cliente aqui só
+  // filtra a lista de projetos. Sem projeto não há a quem atribuir o número.
   const projetos = clientes.find((c) => c.id === clienteId)?.projetos ?? []
+  const [projetoId, setProjetoId] = useState(projetos[0]?.id ?? '')
   // Sem SID não há o que renomear no Twilio.
   const podeRenomear = Boolean(n.sid)
 
@@ -273,7 +274,8 @@ function Linha({
               disabled={travado}
               onChange={(e) => {
                 setClienteId(e.target.value)
-                setProjetoId('')
+                const p = clientes.find((c) => c.id === e.target.value)?.projetos ?? []
+                setProjetoId(p[0]?.id ?? '')
               }}
               className="max-w-52"
               aria-label="Cliente"
@@ -291,9 +293,7 @@ function Linha({
               className="max-w-52"
               aria-label="Projeto"
             >
-              <option value="">
-                {projetos.length === 0 ? 'nenhum projeto cadastrado' : 'sem projeto'}
-              </option>
+              {projetos.length === 0 && <option value="">nenhum projeto cadastrado</option>}
               {projetos.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.nome}
@@ -302,9 +302,9 @@ function Linha({
             </Selecao>
             <Botao
               tamanho="pequeno"
-              disabled={travado || !clienteId}
+              disabled={travado || !projetoId}
               onClick={() => {
-                aoAdotar(clienteId, projetoId || null)
+                aoAdotar(projetoId)
                 setAdotando(false)
               }}
             >
@@ -315,8 +315,8 @@ function Linha({
             </Botao>
           </div>
           <Ajuda>
-            O número vira remetente de SMS e de ligação do cliente, e é renomeado no Twilio com o
-            nome do cliente e do projeto.
+            O número vira remetente de SMS e de ligação deste projeto, e é renomeado no Twilio com
+            o nome do cliente e do projeto. Sem projeto não há a quem atribuí-lo.
           </Ajuda>
         </div>
       )}

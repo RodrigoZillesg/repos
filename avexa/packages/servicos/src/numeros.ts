@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { cliente, clienteCanal, numero, projeto, type Db } from '@avexa/db'
+import { cliente, projetoCanal, numero, projeto, type Db } from '@avexa/db'
 import {
   apontarWebhookSms,
   buscarNumerosDisponiveis,
@@ -145,25 +145,25 @@ export function escolher(numeros: NumeroDisponivel[]): NumeroDisponivel | null {
  *
  *  SMS e ligação juntos, de propósito: o lead precisa ver o mesmo número nos
  *  dois. Receber SMS de um número e ligação de outro parece golpe. */
-export async function definirRemetente(db: Db, clienteId: string, e164: string): Promise<void> {
+export async function definirRemetente(db: Db, projetoId: string, e164: string): Promise<void> {
   for (const canal of ['sms', 'ligacao'] as const) {
     const [linha] = await db
-      .select({ id: clienteCanal.id, config: clienteCanal.config })
-      .from(clienteCanal)
-      .where(and(eq(clienteCanal.clienteId, clienteId), eq(clienteCanal.canal, canal)))
+      .select({ id: projetoCanal.id, config: projetoCanal.config })
+      .from(projetoCanal)
+      .where(and(eq(projetoCanal.projetoId, projetoId), eq(projetoCanal.canal, canal)))
       .limit(1)
 
     if (linha) {
       await db
-        .update(clienteCanal)
+        .update(projetoCanal)
         .set({ config: { ...linha.config, numero: e164 } })
-        .where(eq(clienteCanal.id, linha.id))
+        .where(eq(projetoCanal.id, linha.id))
     } else {
       // O canal pode não existir ainda se o número for comprado antes da
       // ativação. Nasce desligado: comprar número não é contratar canal.
       await db
-        .insert(clienteCanal)
-        .values({ clienteId, canal, ativo: false, config: { numero: e164 } })
+        .insert(projetoCanal)
+        .values({ projetoId, canal, ativo: false, config: { numero: e164 } })
     }
   }
 }
@@ -241,14 +241,16 @@ export async function inventarioDeNumeros(
         e164: numero.e164,
         provedorSid: numero.provedorSid,
         status: numero.status,
-        clienteId: numero.clienteId,
+        clienteId: projeto.clienteId,
         clienteNome: cliente.nome,
         projetoId: numero.projetoId,
         projetoNome: projeto.nome,
       })
       .from(numero)
-      .leftJoin(cliente, eq(numero.clienteId, cliente.id))
-      .leftJoin(projeto, eq(numero.projetoId, projeto.id)),
+      // O cliente do número sai pelo projeto: é a única cadeia de dono, e ter
+      // uma segunda coluna de dono faria as duas divergirem em silêncio.
+      .leftJoin(projeto, eq(numero.projetoId, projeto.id))
+      .leftJoin(cliente, eq(projeto.clienteId, cliente.id)),
   ])
 
   if (!r.ok) return { ok: false, erro: r.erro }
@@ -279,8 +281,8 @@ export async function renomear(
 export interface AdocaoDeNumero {
   sid: string
   e164: string
-  clienteId: string
-  projetoId?: string
+  /** A frente que passa a falar por este número. O cliente sai dela. */
+  projetoId: string
   capacidades?: string[]
   /** Renomeia no Twilio para o padrão cliente · projeto. */
   renomear?: boolean
@@ -304,42 +306,30 @@ export async function adotarNumero(
   webhook?: string | null,
 ): Promise<ResultadoNumero> {
   const [dono] = await db
-    .select({ clienteId: numero.clienteId, e164: numero.e164 })
+    .select({ projetoId: numero.projetoId })
     .from(numero)
     .where(eq(numero.e164, a.e164))
     .limit(1)
 
-  if (dono?.clienteId && dono.clienteId !== a.clienteId) {
-    // Dois clientes no mesmo número misturariam as respostas: o webhook traz o
-    // número, não o cliente, e não há como saber de quem é o lead que respondeu.
-    return { ok: false, erro: 'este número já é de outro cliente na Avexa.' }
+  if (dono?.projetoId && dono.projetoId !== a.projetoId) {
+    // Dois projetos no mesmo número misturariam as respostas: o webhook traz o
+    // número, e não há como saber de qual frente é o lead que respondeu.
+    return { ok: false, erro: 'este número já é de outro projeto na Avexa.' }
   }
 
-  const [c] = await db
-    .select({ nome: cliente.nome })
-    .from(cliente)
-    .where(eq(cliente.id, a.clienteId))
+  const [p] = await db
+    .select({ cliente: cliente.nome, projeto: projeto.nome })
+    .from(projeto)
+    .innerJoin(cliente, eq(projeto.clienteId, cliente.id))
+    .where(eq(projeto.id, a.projetoId))
     .limit(1)
-  if (!c) return { ok: false, erro: 'cliente não encontrado' }
-
-  if (a.projetoId) {
-    const [p] = await db
-      .select({ clienteId: projeto.clienteId })
-      .from(projeto)
-      .where(eq(projeto.id, a.projetoId))
-      .limit(1)
-    if (!p) return { ok: false, erro: 'projeto não encontrado' }
-    if (p.clienteId !== a.clienteId) {
-      return { ok: false, erro: 'este projeto é de outro cliente' }
-    }
-  }
+  if (!p) return { ok: false, erro: 'projeto não encontrado' }
 
   const valores = {
     provedor: 'twilio',
     provedorSid: a.sid,
     status: 'atribuido' as const,
-    clienteId: a.clienteId,
-    projetoId: a.projetoId ?? null,
+    projetoId: a.projetoId,
     ...(a.capacidades?.length ? { capacidades: a.capacidades } : {}),
   }
 
@@ -348,7 +338,7 @@ export async function adotarNumero(
     .values({ e164: a.e164, ...valores })
     .onConflictDoUpdate({ target: numero.e164, set: valores })
 
-  await definirRemetente(db, a.clienteId, a.e164)
+  await definirRemetente(db, a.projetoId, a.e164)
 
   // O webhook vem depois do banco de propósito: se ele falhar, o número já está
   // registrado e o erro é visível e refazível. Na ordem inversa, o número
@@ -367,16 +357,7 @@ export async function adotarNumero(
   }
 
   if (a.renomear !== false) {
-    const nomeProjeto = a.projetoId
-      ? ((
-          await db
-            .select({ nome: projeto.nome })
-            .from(projeto)
-            .where(eq(projeto.id, a.projetoId))
-            .limit(1)
-        )[0]?.nome ?? null)
-      : null
-    const r = await renomearNoTwilio(cred, a.sid, apelidoPadrao(c.nome, nomeProjeto))
+    const r = await renomearNoTwilio(cred, a.sid, apelidoPadrao(p.cliente, p.projeto))
     if (!r.ok) avisos.push(`O nome no Twilio não foi trocado (${r.erro}).`)
   }
 

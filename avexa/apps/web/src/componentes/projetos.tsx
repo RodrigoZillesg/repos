@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Archive, Check, Pencil, Plus, TriangleAlert, X } from 'lucide-react'
-import type { Projeto, ResultadoProjeto } from '@avexa/servicos'
+import type { Projeto, ResultadoCanal, ResultadoProjeto } from '@avexa/servicos'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, Entrada } from '@/componentes/ui/campo'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
@@ -24,6 +24,12 @@ interface Props {
   aoCriar: (clienteId: string, nome: string) => Promise<ResultadoProjeto>
   aoRenomear: (clienteId: string, projetoId: string, nome: string) => Promise<ResultadoProjeto>
   aoArquivar: (clienteId: string, projetoId: string) => Promise<ResultadoProjeto>
+  aoAlternarSeco: (
+    clienteId: string,
+    projetoId: string,
+    nome: string,
+    dryRun: boolean,
+  ) => Promise<ResultadoCanal>
 }
 
 export function Projetos({
@@ -33,6 +39,7 @@ export function Projetos({
   aoCriar,
   aoRenomear,
   aoArquivar,
+  aoAlternarSeco,
 }: Props) {
   const [novo, setNovo] = useState('')
   const [editando, setEditando] = useState<string | null>(null)
@@ -41,7 +48,7 @@ export function Projetos({
   const [rodando, iniciar] = useTransition()
   const travado = !podeAdministrar || rodando
 
-  const mostrar = (r: ResultadoProjeto, sucesso: string) =>
+  const mostrar = (r: ResultadoProjeto | ResultadoCanal, sucesso: string) =>
     setMsg(
       !r.ok
         ? { tom: 'erro', texto: r.erro }
@@ -66,7 +73,8 @@ export function Projetos({
       <h3 className="text-sm font-semibold">Projetos</h3>
       <Ajuda>
         Frentes de trabalho deste cliente: duas escolas da mesma rede, duas campanhas, dois idiomas.
-        O nome do projeto é o que batiza o número de telefone no Twilio.
+        Cada uma tem o próprio número, os próprios canais, agente, templates e destino de entrega —
+        e o próprio modo seco, para virar a torneira de uma sem mexer na outra.
       </Ajuda>
 
       {ativos.length > 0 && (
@@ -107,10 +115,37 @@ export function Projetos({
                 </>
               ) : (
                 <>
-                  <span className="min-w-0 flex-1 text-[13px] font-medium">{p.nome}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-medium">{p.nome}</span>
+                    <span className="block font-mono text-[11px] text-[var(--color-tinta-3)]">
+                      /{p.slug}/
+                    </span>
+                  </span>
                   <Selo tom={p.numeros > 0 ? 'acento' : 'neutro'}>
                     {p.numeros === 1 ? '1 número' : `${p.numeros} números`}
                   </Selo>
+                  {/* O modo seco é por frente: esta escola pode rodar em
+                      espelho enquanto a outra já contata gente de verdade. */}
+                  <Botao
+                    variante={p.dryRun ? 'contorno' : 'fantasma'}
+                    tamanho="pequeno"
+                    disabled={travado}
+                    title={
+                      p.dryRun
+                        ? 'O fluxo roda inteiro e nada é enviado. Desligar abre a torneira desta frente.'
+                        : 'Os contatos desta frente saem de verdade.'
+                    }
+                    onClick={() =>
+                      iniciar(async () =>
+                        mostrar(
+                          await aoAlternarSeco(clienteId, p.id, p.nome, !p.dryRun),
+                          p.dryRun ? 'Modo seco desligado.' : 'Modo seco ligado.',
+                        ),
+                      )
+                    }
+                  >
+                    {p.dryRun ? 'modo seco' : 'no ar'}
+                  </Botao>
                   <Botao
                     variante="fantasma"
                     tamanho="pequeno"

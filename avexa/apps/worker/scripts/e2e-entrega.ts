@@ -11,15 +11,15 @@
  *  do outro lado, que é o que o cliente vai fazer. */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { desc, eq } from 'drizzle-orm'
-import { cliente, db, integracao, lead as tLead, reuniao } from '@avexa/db'
+import { cliente, db, integracao, lead as tLead, projeto, reuniao } from '@avexa/db'
 import {
   concluirConexaoHubspot,
-  definirWebhookDoCliente,
+  definirWebhookDoProjeto,
   encerrarFila,
   entregasDoLead,
   enviarReuniaoAoCrm,
   ingerirLead,
-  webhookDoCliente,
+  webhookDoProjeto,
 } from '@avexa/servicos'
 import { adaptadoresDoAmbiente, conferirAssinaturaSaida as conferir } from '@avexa/adapters'
 import { entregarLead, dispararWebhookSaida } from '../src/entrega.ts'
@@ -139,6 +139,18 @@ globalThis.fetch = (async (entrada: string | URL | Request, init?: RequestInit) 
 const d = db()
 const [c] = await d.select().from(cliente).where(eq(cliente.slug, 'ihte')).limit(1)
 if (!c) {
+  console.error('sem o cliente ihte: rode o seed antes')
+  process.exit(1)
+}
+// Destinos e conexões de agenda são do projeto; o registro de entrega continua
+// sendo do cliente. O fixture precisa dos dois.
+const [proj] = await d.select().from(projeto).where(eq(projeto.clienteId, c.id)).limit(1)
+if (!proj) {
+  console.error('o cliente ihte não tem projeto: rode o seed antes')
+  process.exit(1)
+}
+const projetoId = proj.id
+if (!c) {
   console.error('rode o seed antes')
   process.exit(1)
 }
@@ -178,6 +190,7 @@ await d
 const pedidoBase = {
   leadId: entrada.leadId,
   clienteId: c.id,
+  projetoId,
   execucaoId: entrada.execucaoId,
   etapaId: 'saida-1',
   urgente: true,
@@ -194,7 +207,7 @@ if (semCrm.ok) problemas.push('entregou num destino que não existe')
 if (regSemCrm?.estado !== 'sem_destino') problemas.push('destino ausente não virou registro `sem_destino`')
 
 // 2. Modo seco: o destino é resolvido, nada sai, e o registro diz isso.
-await definirWebhookDoCliente(d, c.id, URL_CLIENTE)
+await definirWebhookDoProjeto(d, c.id, URL_CLIENTE)
 const seco = await entregarLead(amb, { ...pedidoBase, destino: 'Webhook do cliente', seco: true })
 console.log(`2. modo seco: ok=${seco.ok} · chamadas ao cliente=${recebidos.length}`)
 if (recebidos.length !== 0) problemas.push('o modo seco bateu no endpoint do cliente')
@@ -205,11 +218,11 @@ const r3 = await entregarLead(amb, { ...pedidoBase, destino: 'Webhook do cliente
 const alvo = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .then((rs) => rs.find((x) => x.tipo === 'webhook'))
 // O segredo pelo mesmo caminho que o worker usa: se ele não voltar decifrado,
 // o problema aparece aqui e não em produção.
-const segredo = (await webhookDoCliente(d, c.id))?.segredo ?? ''
+const segredo = (await webhookDoProjeto(d, c.id))?.segredo ?? ''
 if (!segredo) problemas.push('o segredo do webhook não voltou decifrado')
 
 const recebido = recebidos[0]
@@ -233,6 +246,7 @@ respostas = [500, 502, 200]
 const r4 = await dispararWebhookSaida(amb, {
   leadId: entrada.leadId,
   clienteId: c.id,
+  projetoId,
   execucaoId: entrada.execucaoId,
   etapaId: 'wh-1',
   url: URL_CLIENTE,
@@ -261,6 +275,7 @@ respostas = [400]
 const r5 = await dispararWebhookSaida(amb, {
   leadId: entrada.leadId,
   clienteId: c.id,
+  projetoId,
   url: URL_CLIENTE,
   metodo: 'POST',
   payload: 'Lead e score',
@@ -279,7 +294,7 @@ const conexao = await concluirConexaoHubspot(d, c.id, 'codigo-do-hubspot')
 const linhaHs = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .then((rs) => rs.find((x) => x.tipo === 'hubspot'))
 const cfgHs = (linhaHs?.config ?? {}) as Record<string, unknown>
 console.log(`6. HubSpot conectado: portal ${cfgHs.conta} · status qualificado=${cfgHs.statusQualificado}`)

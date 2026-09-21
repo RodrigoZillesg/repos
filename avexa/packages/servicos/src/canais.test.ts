@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import type { Db } from '@avexa/db'
-import { definirCanal, salvarCliente } from './canais.ts'
+import { definirCanal, salvarCliente, salvarProjeto } from './canais.ts'
 
 /** Ligar um canal sem o pré-requisito é o erro que não dá erro: o painel diz
  *  que está ativo, o fluxo tem a etapa, e nenhum contato sai. Estes testes
@@ -179,7 +179,7 @@ const bancoSimples = (): { db: Db; gravado: Record<string, unknown> | null } => 
   return { db, get gravado() { return caixa.gravado } }
 }
 
-const CADASTRO = { nome: 'Cliente', fusoHorario: 'Australia/Sydney', pais: 'AU', dryRun: true }
+const CADASTRO = { nome: 'Cliente', fusoHorario: 'Australia/Sydney', pais: 'AU' }
 
 test('fuso inválido é recusado: decidiria a janela de contato errada', async () => {
   // Ligar às 3 da manhã na casa de alguém.
@@ -199,9 +199,23 @@ test('nome em branco é recusado', async () => {
   assert.equal((await salvarCliente(b.db, 'cli', { ...CADASTRO, nome: '  ' })).ok, false)
 })
 
-test('desligar o modo seco avisa que os contatos passam a sair de verdade', async () => {
+test('desligar o modo seco avisa que os contatos daquele projeto passam a sair', async () => {
+  // O aviso nomeia o projeto porque a virada é por frente: desligar o seco de
+  // uma escola não abre a torneira da outra, e dizer só "os contatos saem"
+  // faria parecer que abriu.
   const b = bancoSimples()
-  const r = await salvarCliente(b.db, 'cli', { ...CADASTRO, dryRun: false })
+  const r = await salvarProjeto(b.db, 'proj', { nome: 'Sydney CBD', dryRun: false })
   assert.equal(r.ok, true)
-  assert.match(r.ok === true ? (r.aviso ?? '') : '', /de verdade/)
+  assert.match(r.ok === true ? (r.aviso ?? '') : '', /neste projeto/)
+})
+
+test('modo seco ligado não avisa nada', async () => {
+  const b = bancoSimples()
+  const r = await salvarProjeto(b.db, 'proj', { nome: 'Sydney CBD', dryRun: true })
+  assert.equal(r.ok === true && r.aviso, undefined)
+})
+
+test('projeto sem nome é recusado', async () => {
+  const b = bancoSimples()
+  assert.equal((await salvarProjeto(b.db, 'proj', { nome: '  ', dryRun: true })).ok, false)
 })

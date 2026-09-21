@@ -34,6 +34,6 @@ export async function GET(req: Request) {
   const codigo = url.searchParams.get('code')
   if (!codigo) return volta('erro=sem-codigo')
 
-  const r = await concluirConexaoGoogle(db(), estado.clienteId, estado.tipo, codigo)
+  const r = await concluirConexaoGoogle(db(), estado.projetoId, estado.tipo, codigo)
   return volta(r.ok ? `conectado=${estado.tipo}` : `erro=${encodeURIComponent(r.erro ?? 'falhou')}`)
 }

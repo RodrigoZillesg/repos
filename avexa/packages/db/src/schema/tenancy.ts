@@ -39,9 +39,6 @@ export const cliente = pgTable(
     /** Ferramenta de agenda preferida quando o cliente conectou mais de uma.
      *  Nulo deixa a escolha para o serviço. */
     provedorAgenda: provedorAgendaEnum(),
-    /** Executa fluxos por inteiro e registra tudo, sem disparar nada de verdade.
-     *  Permite rodar em espelho antes da virada. */
-    dryRun: boolean().notNull().default(true),
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
     atualizadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -67,6 +64,13 @@ export const projeto = pgTable(
       .notNull()
       .references(() => cliente.id, { onDelete: 'cascade' }),
     nome: text().notNull(),
+    /** Terceiro segmento da URL de webhook:
+     *  hooks.avexa.global/v1/<clienteSlug>/<projetoSlug>/<fluxoSlug> */
+    slug: text().notNull(),
+    /** Executa fluxos por inteiro e registra tudo, sem disparar nada de verdade.
+     *  Fica no projeto e não no cliente para dar virar a torneira de uma frente
+     *  por vez: a escola nova entra em seco enquanto a antiga já contata. */
+    dryRun: boolean().notNull().default(true),
     /** Projeto encerrado some das listas de escolha sem sumir dos números que
      *  já carregam o nome dele. Apagar quebraria o histórico. */
     ativo: boolean().notNull().default(true),
@@ -76,25 +80,30 @@ export const projeto = pgTable(
     // Sem distinguir maiúscula: "Path A" e "path a" são o mesmo projeto, e dois
     // deles dariam dois apelidos iguais no Twilio para números diferentes.
     uniqueIndex('projeto_nome_idx').on(t.clienteId, sql`lower(${t.nome})`),
+    uniqueIndex('projeto_slug_idx').on(t.clienteId, t.slug),
     index('projeto_cliente_idx').on(t.clienteId),
   ],
 )
 
-/** Canais contratados por cliente. Um nó de canal desligado aqui aparece como
- *  "off" no construtor e não pode ser inserido. */
-export const clienteCanal = pgTable(
-  'cliente_canal',
+/** Canais contratados por PROJETO. Um nó de canal desligado aqui aparece como
+ *  "off" no construtor e não pode ser inserido.
+ *
+ *  Por projeto e não por cliente porque é o projeto que tem número próprio: uma
+ *  frente pode usar SMS e a outra não, e as duas falam de telefones diferentes.
+ *  Com isso preso ao cliente, ligar SMS para uma escola ligava para as duas. */
+export const projetoCanal = pgTable(
+  'projeto_canal',
   {
     id: uuid().primaryKey().defaultRandom(),
-    clienteId: uuid()
+    projetoId: uuid()
       .notNull()
-      .references(() => cliente.id, { onDelete: 'cascade' }),
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     canal: canalEnum().notNull(),
     ativo: boolean().notNull().default(true),
     /** Ajustes por canal: remetente, número dedicado de voz, id do assistente Vapi. */
     config: jsonb().$type<Record<string, unknown>>().notNull().default({}),
   },
-  (t) => [uniqueIndex('cliente_canal_idx').on(t.clienteId, t.canal)],
+  (t) => [uniqueIndex('projeto_canal_idx').on(t.projetoId, t.canal)],
 )
 
 /** Pool de números. Voz é o único canal com número dedicado por cliente; o mesmo
@@ -109,10 +118,12 @@ export const numero = pgTable(
     /** Capacidades do número: ['voz','sms'] */
     capacidades: jsonb().$type<string[]>().notNull().default(['voz', 'sms']),
     status: numeroStatusEnum().notNull().default('livre'),
-    clienteId: uuid().references(() => cliente.id, { onDelete: 'set null' }),
-    /** Frente do cliente que fala por este número. É o que dá nome ao número no
-     *  console do Twilio. Nulo enquanto o número está no pool, e ao apagar o
-     *  projeto o número continua nosso — só perde o nome. */
+    /** Frente que fala por este número, e o único dono dele.
+     *
+     *  O cliente sai por aqui (projeto.clienteId) em vez de ter coluna própria:
+     *  duas colunas de dono divergem, e a divergência silenciosa seria um
+     *  número falando por um cliente e nomeado por outro. Nulo enquanto o
+     *  número está no pool; ao apagar o projeto o número continua nosso. */
     projetoId: uuid().references(() => projeto.id, { onDelete: 'set null' }),
     /** Id do assistente de voz (Vapi) configurado para este número. */
     assistenteId: text(),
@@ -120,7 +131,7 @@ export const numero = pgTable(
   },
   (t) => [
     uniqueIndex('numero_e164_idx').on(t.e164),
-    index('numero_cliente_idx').on(t.clienteId),
+    index('numero_projeto_idx').on(t.projetoId),
   ],
 )
 

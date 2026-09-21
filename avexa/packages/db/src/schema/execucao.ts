@@ -17,7 +17,7 @@ import {
   reuniaoStatusEnum,
   tentativaEstadoEnum,
 } from './enums.ts'
-import { cliente } from './tenancy.ts'
+import { cliente, projeto } from './tenancy.ts'
 import { fluxo, fluxoVersao } from './fluxo.ts'
 import { lead, pessoa } from './lead.ts'
 
@@ -37,6 +37,16 @@ export const execucao = pgTable(
     clienteId: uuid()
       .notNull()
       .references(() => cliente.id, { onDelete: 'cascade' }),
+    /** Projeto congelado junto com a versão do fluxo.
+     *
+     *  É daqui que sai o número de onde o contato parte. Fica gravado em vez de
+     *  ser seguido pelo fluxo a cada passo pelo mesmo motivo de `fluxoVersaoId`:
+     *  um lead que está há dois dias numa espera precisa terminar falando pelo
+     *  mesmo telefone em que começou. Mover o fluxo de projeto no meio trocaria
+     *  o número entre uma tentativa e a seguinte, e o lead veria duas origens. */
+    projetoId: uuid()
+      .notNull()
+      .references(() => projeto.id, { onDelete: 'cascade' }),
     fluxoId: uuid()
       .notNull()
       .references(() => fluxo.id, { onDelete: 'cascade' }),

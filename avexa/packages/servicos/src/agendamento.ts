@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { cliente, lead, reuniao, type Db } from '@avexa/db'
+import { cliente, lead, projeto, reuniao, type Db } from '@avexa/db'
 import { adaptadorCalendly, adaptadorGoogleAgenda } from '@avexa/adapters'
 import type {
   AdaptadorAgenda,
@@ -25,15 +25,22 @@ import { conexaoGoogle } from './google.ts'
  *  Quando os dois estão conectados, vale a preferência gravada; sem preferência,
  *  o Calendly ganha, porque conectá-lo é um gesto mais deliberado do que ter o
  *  Google ligado para planilha. */
-export async function provedorDoCliente(
+export async function provedorDoProjeto(
   db: Db,
-  clienteId: string,
+  projetoId: string,
 ): Promise<ProvedorAgenda | null> {
-  const [c] = await db.select().from(cliente).where(eq(cliente.id, clienteId)).limit(1)
+  // A preferência é do cliente — quem contratou a ferramenta foi ele —, mas as
+  // conexões são do projeto, porque cada frente marca na agenda do próprio time.
+  const [c] = await db
+    .select({ provedorAgenda: cliente.provedorAgenda })
+    .from(projeto)
+    .innerJoin(cliente, eq(projeto.clienteId, cliente.id))
+    .where(eq(projeto.id, projetoId))
+    .limit(1)
   const preferido = c?.provedorAgenda as ProvedorAgenda | null | undefined
 
-  const calendly = await conexaoCalendly(db, clienteId)
-  const google = await conexaoGoogle(db, clienteId, 'google_calendar')
+  const calendly = await conexaoCalendly(db, projetoId)
+  const google = await conexaoGoogle(db, projetoId, 'google_calendar')
 
   const temCalendly = !('erro' in calendly)
   const temGoogle = !('erro' in google)
@@ -54,17 +61,17 @@ export interface RoteamentoDoPedido {
 
 export async function criarAdaptadorAgenda(
   db: Db,
-  clienteId: string,
+  projetoId: string,
   limites: LimitesMotor,
   roteamento: RoteamentoDoPedido = {},
 ): Promise<AdaptadorAgenda | { erro: string; precisaReconectar?: boolean }> {
-  const provedor = await provedorDoCliente(db, clienteId)
+  const provedor = await provedorDoProjeto(db, projetoId)
   if (!provedor) {
     return { erro: 'nenhuma ferramenta de agenda conectada', precisaReconectar: true }
   }
 
   if (provedor === 'calendly') {
-    const conexao = await conexaoCalendly(db, clienteId)
+    const conexao = await conexaoCalendly(db, projetoId)
     if ('erro' in conexao) return conexao
     const tipoDeEventoUri = conexao.config.tipoDeEvento as string | undefined
     if (!tipoDeEventoUri) {
@@ -73,7 +80,7 @@ export async function criarAdaptadorAgenda(
     return adaptadorCalendly({ accessToken: conexao.accessToken, tipoDeEventoUri })
   }
 
-  const conexao = await conexaoGoogle(db, clienteId, 'google_calendar')
+  const conexao = await conexaoGoogle(db, projetoId, 'google_calendar')
   if ('erro' in conexao) return conexao
   const configuradas = (conexao.config.calendarios as string[] | undefined) ?? []
 
@@ -97,6 +104,10 @@ export async function criarAdaptadorAgenda(
 }
 
 export interface PedidoAgendamento extends PedidoReuniao {
+  /** Onde está a conexão de agenda: cada frente marca na agenda do time dela. */
+  projetoId: string
+  /** O dono da reunião no painel. A reunião é um registro do cliente, como o
+   *  lead — o projeto diz apenas em qual agenda ela foi marcada. */
   clienteId: string
   leadId: string
   execucaoId?: string
@@ -114,7 +125,7 @@ export async function oferecerReuniao(
   db: Db,
   p: PedidoAgendamento,
 ): Promise<ResultadoReuniao & { provedor?: ProvedorAgenda }> {
-  const adaptador = await criarAdaptadorAgenda(db, p.clienteId, p.limites, {
+  const adaptador = await criarAdaptadorAgenda(db, p.projetoId, p.limites, {
     rodizio: p.rodizio,
     calendario: p.calendario,
   })

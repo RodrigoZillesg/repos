@@ -18,6 +18,9 @@ import { Ajuda, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Selo } from '@/componentes/ui/cartao'
 
 export interface EstadoCliente {
+  /** Dono das conexões: agenda e CRM são por frente. */
+  projetoId: string
+  /** A preferência de agenda é do cliente — quem contratou a ferramenta foi ele. */
   clienteId: string
   provedorEscolhido: ProvedorAgenda | null
   googleConfigurado: boolean
@@ -62,7 +65,7 @@ type TipoConectavel = 'google_calendar' | 'google_sheets' | 'calendly' | 'hubspo
 interface Props {
   estado: EstadoCliente
   podeAdministrar: boolean
-  aoDesligar: (clienteId: string, tipo: Tipo) => Promise<{ ok: boolean }>
+  aoDesligar: (projetoId: string, tipo: Tipo) => Promise<{ ok: boolean }>
   aoSalvarAgendas: (
     c: string,
     calendarios: string[],
@@ -104,19 +107,19 @@ interface Props {
 }
 
 function Conectar({
-  clienteId,
+  projetoId,
   tipo,
   disponivel,
   rotulo,
 }: {
-  clienteId: string
+  projetoId: string
   tipo: TipoConectavel
   disponivel: boolean
   rotulo: string
 }) {
   return (
     <Botao comoFilho className="mt-4" {...(!disponivel ? { disabled: true } : {})}>
-      <a href={`/api/integracoes/iniciar?cliente=${clienteId}&tipo=${tipo}`}>{rotulo}</a>
+      <a href={`/api/integracoes/iniciar?projeto=${projetoId}&tipo=${tipo}`}>{rotulo}</a>
     </Botao>
   )
 }
@@ -309,7 +312,7 @@ function FunilHubspot({
   aoCriar,
   aoSalvar,
 }: {
-  clienteId: string
+  projetoId: string
   negociosOk: boolean
   pipelineSalvo: string | null
   nomeSalvo: string | null
@@ -529,7 +532,7 @@ export function Integracoes(p: Props) {
                 variante={ativo === prov ? 'padrao' : 'contorno'}
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoEscolherProvedor(e.clienteId, prov), 'Escolhido.')}
+                onClick={() => rodar(() => p.aoEscolherProvedor(e.projetoId, prov), 'Escolhido.')}
               >
                 {prov === 'calendly' ? 'Calendly' : 'Google Calendar'}
               </Botao>
@@ -562,7 +565,7 @@ export function Integracoes(p: Props) {
 
         {!e.calendar.conectada ? (
           <Conectar
-            clienteId={e.clienteId}
+            projetoId={e.projetoId}
             tipo="google_calendar"
             disponivel={p.podeAdministrar && e.googleConfigurado}
             rotulo="Conectar Google Calendar"
@@ -582,7 +585,7 @@ export function Integracoes(p: Props) {
               aoDigitarManual={setAgendaManual}
               aoCarregar={() =>
                 iniciar(async () => {
-                  const r = await p.aoBuscarAgendas(e.clienteId)
+                  const r = await p.aoBuscarAgendas(e.projetoId)
                   if ('erro' in r) setAviso(r.erro)
                   else {
                     setListaAgendas(r.agendas)
@@ -608,7 +611,7 @@ export function Integracoes(p: Props) {
                 onClick={() =>
                   rodar(
                     () =>
-                      p.aoSalvarAgendas(e.clienteId, agendas, rodizio, {
+                      p.aoSalvarAgendas(e.projetoId, agendas, rodizio, {
                         ...e.calendar.nomes,
                         ...Object.fromEntries((listaAgendas ?? []).map((a) => [a.id, a.nome])),
                       }),
@@ -622,7 +625,7 @@ export function Integracoes(p: Props) {
                 variante="perigo"
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'google_calendar'), 'Desconectado, e o acesso foi revogado na conta Google.')}
+                onClick={() => rodar(() => p.aoDesligar(e.projetoId, 'google_calendar'), 'Desconectado, e o acesso foi revogado na conta Google.')}
               >
                 <Link2Off size={12} /> Desconectar
               </Botao>
@@ -656,7 +659,7 @@ export function Integracoes(p: Props) {
 
         {!e.calendly.conectada ? (
           <Conectar
-            clienteId={e.clienteId}
+            projetoId={e.projetoId}
             tipo="calendly"
             disponivel={p.podeAdministrar && e.calendlyConfigurado}
             rotulo="Conectar Calendly"
@@ -694,7 +697,7 @@ export function Integracoes(p: Props) {
                   disabled={!p.podeAdministrar || pendente}
                   onClick={() =>
                     iniciar(async () => {
-                      const r = await p.aoBuscarTipos(e.clienteId)
+                      const r = await p.aoBuscarTipos(e.projetoId)
                       if ('erro' in r) setAviso(r.erro)
                       else {
                         setTipos(r.tipos)
@@ -718,7 +721,7 @@ export function Integracoes(p: Props) {
                 onClick={() => {
                   const t = tipos.find((x) => x.uri === tipoEscolhido)
                   rodar(
-                    () => p.aoSalvarTipoDeEvento(e.clienteId, tipoEscolhido, t?.nome, t?.duracaoMin),
+                    () => p.aoSalvarTipoDeEvento(e.projetoId, tipoEscolhido, t?.nome, t?.duracaoMin),
                     'Salvo.',
                   )
                 }}
@@ -729,7 +732,7 @@ export function Integracoes(p: Props) {
                 variante="perigo"
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'calendly'), 'Desconectado. Remova também o acesso do Avexa em Integrations, na conta Calendly.')}
+                onClick={() => rodar(() => p.aoDesligar(e.projetoId, 'calendly'), 'Desconectado. Remova também o acesso do Avexa em Integrations, na conta Calendly.')}
               >
                 <Link2Off size={12} /> Desconectar
               </Botao>
@@ -757,7 +760,7 @@ export function Integracoes(p: Props) {
 
         {!e.sheets.conectada ? (
           <Conectar
-            clienteId={e.clienteId}
+            projetoId={e.projetoId}
             tipo="google_sheets"
             disponivel={p.podeAdministrar && e.googleConfigurado}
             rotulo="Conectar Google Sheets"
@@ -790,7 +793,7 @@ export function Integracoes(p: Props) {
               <Botao
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoSalvarPlanilha(e.clienteId, planilha, aba), 'Salvo.')}
+                onClick={() => rodar(() => p.aoSalvarPlanilha(e.projetoId, planilha, aba), 'Salvo.')}
               >
                 Salvar
               </Botao>
@@ -798,7 +801,7 @@ export function Integracoes(p: Props) {
                 variante="perigo"
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
-                onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'google_sheets'), 'Desconectado.')}
+                onClick={() => rodar(() => p.aoDesligar(e.projetoId, 'google_sheets'), 'Desconectado.')}
               >
                 <Link2Off size={12} /> Desconectar
               </Botao>
@@ -834,7 +837,7 @@ export function Integracoes(p: Props) {
 
         {!e.hubspot.conectada ? (
           <Conectar
-            clienteId={e.clienteId}
+            projetoId={e.projetoId}
             tipo="hubspot"
             disponivel={p.podeAdministrar && e.hubspotConfigurado}
             rotulo="Conectar HubSpot"
@@ -896,7 +899,7 @@ export function Integracoes(p: Props) {
             </Ajuda>
 
             <FunilHubspot
-              clienteId={e.clienteId}
+              projetoId={e.projetoId}
               negociosOk={e.hubspot.negociosOk}
               pipelineSalvo={e.hubspot.pipeline}
               nomeSalvo={e.hubspot.pipelineNome}
@@ -919,7 +922,7 @@ export function Integracoes(p: Props) {
               aoTrocarNomeNovo={setNomePipelineNovo}
               aoCarregar={() =>
                 iniciar(async () => {
-                  const r = await p.aoBuscarPipelines(e.clienteId)
+                  const r = await p.aoBuscarPipelines(e.projetoId)
                   if ('erro' in r) setAviso(r.erro)
                   else {
                     setPipelines(r.pipelines)
@@ -929,7 +932,7 @@ export function Integracoes(p: Props) {
               }
               aoCriar={() =>
                 iniciar(async () => {
-                  const r = await p.aoCriarPipeline(e.clienteId, nomePipelineNovo.trim())
+                  const r = await p.aoCriarPipeline(e.projetoId, nomePipelineNovo.trim())
                   if (!r.ok) return setAviso(r.erro)
                   setPipelines((x) => [...(x ?? []), r.pipeline])
                   setPipeline(r.pipeline.id)
@@ -943,7 +946,7 @@ export function Integracoes(p: Props) {
                 rodar(
                   () =>
                     p.aoSalvarFunilHubspot(
-                      e.clienteId,
+                      e.projetoId,
                       pipeline,
                       estagioQual,
                       estagioNao,
@@ -959,7 +962,7 @@ export function Integracoes(p: Props) {
                 tamanho="pequeno"
                 disabled={!p.podeAdministrar || pendente}
                 onClick={() =>
-                  rodar(() => p.aoSalvarStatusHubspot(e.clienteId, statusQual, statusNao), 'Salvo.')
+                  rodar(() => p.aoSalvarStatusHubspot(e.projetoId, statusQual, statusNao), 'Salvo.')
                 }
               >
                 Salvar
@@ -970,7 +973,7 @@ export function Integracoes(p: Props) {
                 disabled={!p.podeAdministrar || pendente}
                 onClick={() =>
                   rodar(
-                    () => p.aoDesligar(e.clienteId, 'hubspot'),
+                    () => p.aoDesligar(e.projetoId, 'hubspot'),
                     'Desconectado. Remova também o app da Avexa em Integrações, na conta HubSpot.',
                   )
                 }
@@ -1032,7 +1035,7 @@ export function Integracoes(p: Props) {
             disabled={!p.podeAdministrar || pendente || !urlWebhook}
             onClick={() =>
               iniciar(async () => {
-                const r = await p.aoSalvarWebhook(e.clienteId, urlWebhook, false)
+                const r = await p.aoSalvarWebhook(e.projetoId, urlWebhook, false)
                 setSegredoNovo(r.segredo ?? null)
                 setAviso(r.ok ? 'Salvo.' : (r.erro ?? 'Não foi possível salvar.'))
               })
@@ -1046,7 +1049,7 @@ export function Integracoes(p: Props) {
             disabled={!p.podeAdministrar || pendente || !e.webhook.url}
             onClick={() =>
               iniciar(async () => {
-                const r = await p.aoTestarWebhook(e.clienteId)
+                const r = await p.aoTestarWebhook(e.projetoId)
                 setAviso(
                   r.ok
                     ? `O endpoint respondeu ${r.status}. A assinatura que ele recebeu é a mesma dos leads de verdade.`
@@ -1063,7 +1066,7 @@ export function Integracoes(p: Props) {
             disabled={!p.podeAdministrar || pendente || !e.webhook.url}
             onClick={() =>
               iniciar(async () => {
-                const r = await p.aoSalvarWebhook(e.clienteId, urlWebhook, true)
+                const r = await p.aoSalvarWebhook(e.projetoId, urlWebhook, true)
                 setSegredoNovo(r.segredo ?? null)
                 setAviso(
                   r.ok
@@ -1080,7 +1083,7 @@ export function Integracoes(p: Props) {
               variante="perigo"
               tamanho="pequeno"
               disabled={!p.podeAdministrar || pendente}
-              onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'webhook'), 'Removido.')}
+              onClick={() => rodar(() => p.aoDesligar(e.projetoId, 'webhook'), 'Removido.')}
             >
               <Link2Off size={12} /> Remover
             </Botao>
@@ -1116,7 +1119,7 @@ export function Integracoes(p: Props) {
             disabled={!p.podeAdministrar || pendente || !emailTime}
             onClick={() =>
               iniciar(async () => {
-                const r = await p.aoSalvarEmailTime(e.clienteId, emailTime)
+                const r = await p.aoSalvarEmailTime(e.projetoId, emailTime)
                 setAviso(r.ok ? 'Salvo.' : (r.erro ?? 'Não foi possível salvar.'))
               })
             }
@@ -1128,7 +1131,7 @@ export function Integracoes(p: Props) {
               variante="perigo"
               tamanho="pequeno"
               disabled={!p.podeAdministrar || pendente}
-              onClick={() => rodar(() => p.aoDesligar(e.clienteId, 'email_time'), 'Removido.')}
+              onClick={() => rodar(() => p.aoDesligar(e.projetoId, 'email_time'), 'Removido.')}
             >
               <Link2Off size={12} /> Remover
             </Botao>

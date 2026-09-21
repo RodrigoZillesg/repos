@@ -6,7 +6,7 @@
  *  integração em vez de tentar para sempre, e que o agendamento cai num horário
  *  livre dentro da janela do lead. */
 import { eq } from 'drizzle-orm'
-import { cliente, db, integracao } from '@avexa/db'
+import { cliente, db, integracao, projeto } from '@avexa/db'
 import {
   concluirConexaoGoogle,
   conexaoGoogle,
@@ -76,6 +76,18 @@ globalThis.fetch = (async (entrada: string | URL | Request, init?: RequestInit) 
 const d = db()
 const [c] = await d.select().from(cliente).where(eq(cliente.slug, 'ihte')).limit(1)
 if (!c) {
+  console.error('sem o cliente ihte: rode o seed antes')
+  process.exit(1)
+}
+// Destinos e conexões de agenda são do projeto; o registro de entrega continua
+// sendo do cliente. O fixture precisa dos dois.
+const [proj] = await d.select().from(projeto).where(eq(projeto.clienteId, c.id)).limit(1)
+if (!proj) {
+  console.error('o cliente ihte não tem projeto: rode o seed antes')
+  process.exit(1)
+}
+const projetoId = proj.id
+if (!c) {
   console.error('rode o seed antes')
   process.exit(1)
 }
@@ -91,7 +103,7 @@ if (!conexao.ok) problemas.push('a conexão falhou')
 const [linha] = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .limit(50)
   .then((rs) => rs.filter((r) => r.tipo === 'google_calendar'))
 
@@ -134,6 +146,7 @@ if (!entrada.aceito) {
 
 const r = await oferecerReuniao(d, {
   clienteId: c.id,
+  projetoId,
   leadId: entrada.leadId,
   execucaoId: entrada.execucaoId,
   titulo: 'Conversa sobre o curso',
@@ -191,7 +204,7 @@ if (!('erro' in depois) || !depois.precisaReconectar) {
 const [final] = await d
   .select()
   .from(integracao)
-  .where(eq(integracao.clienteId, c.id))
+  .where(eq(integracao.projetoId, c.id))
   .then((rs) => rs.filter((x) => x.tipo === 'google_calendar'))
 if (final?.ativo) problemas.push('a integração revogada continuou ativa')
 
