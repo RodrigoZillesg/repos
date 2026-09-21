@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, prontidao, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -35,7 +35,7 @@ on:
         type: string
         default: AU
       cliente:
-        description: 'Para "comprar-numero": slug do cliente. Vazio = vai para o pool'
+        description: 'Slug do cliente. "comprar-numero": vazio = pool. "prontidao": vazio = todos'
         type: string
         default: ''
       id:
@@ -463,6 +463,15 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker vapi '${{ inputs.id }}'"
+
+      # O que falta para um cliente fazer contato de verdade. Só lê: não liga
+      # canal, não publica agente, não manda lead.
+      - name: Prontidão dos clientes
+        if: inputs.acao == 'prontidao'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker prontidao '${{ inputs.cliente }}'"
 
       # Reenvia para a Vapi os agentes que já estão no ar.
       #

@@ -23,7 +23,8 @@
     "numeros": "tsx scripts/numeros.ts",
     "vapi": "tsx scripts/vapi-inspecionar.ts",
     "publicar-agentes": "tsx scripts/publicar-agentes.ts",
-    "e2e:paginacao": "tsx scripts/e2e-paginacao.ts"
+    "e2e:paginacao": "tsx scripts/e2e-paginacao.ts",
+    "prontidao": "tsx scripts/prontidao.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",
