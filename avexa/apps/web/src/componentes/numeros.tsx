@@ -39,20 +39,21 @@ interface Props {
   ) => Promise<ResultadoNumero>
 }
 
-const TITULO: Record<NumeroInventariado['origem'], string> = {
+/** Esta tela mostra o que a conta do Twilio tem. Número que existe só na nossa
+ *  tabela fica de fora: quem cobra isso é a prontidão, pelo `provedorSid`, e
+ *  `numeros reais` na linha de comando continua listando os dois lados. */
+const GRUPOS = ['avexa', 'fora'] as const
+
+const TITULO: Record<(typeof GRUPOS)[number], string> = {
   avexa: 'Na Avexa',
   fora: 'Na conta do Twilio, fora da Avexa',
-  sumido: 'A Avexa acha que tem, e o Twilio não tem',
 }
 
-const EXPLICACAO: Record<NumeroInventariado['origem'], string> = {
+const EXPLICACAO: Record<(typeof GRUPOS)[number], string> = {
   avexa: 'Números atribuídos a um cliente daqui. O motor liga e manda SMS por eles.',
   fora:
     'Comprados fora da Avexa — a operação antiga. O nome é a única pista de quem é o dono. ' +
     'Dá para renomear, e dá para trazer para um cliente daqui.',
-  sumido:
-    'Estão na nossa tabela e não existem na conta do Twilio. O cliente aparece com número, o canal ' +
-    'de SMS liga porque o pré-requisito está satisfeito, e o envio morre no fim. Nada sai por eles.',
 }
 
 export function Numeros({ numeros, clientes, podeAdministrar, aoRenomear, aoAdotar }: Props) {
@@ -68,9 +69,10 @@ export function Numeros({ numeros, clientes, podeAdministrar, aoRenomear, aoAdot
           : { tom: 'ok', texto: sucesso },
     )
 
-  const grupos = (['sumido', 'avexa', 'fora'] as const)
-    .map((origem) => ({ origem, itens: numeros.filter((n) => n.origem === origem) }))
-    .filter((g) => g.itens.length > 0)
+  const grupos = GRUPOS.map((origem) => ({
+    origem,
+    itens: numeros.filter((n) => n.origem === origem),
+  })).filter((g) => g.itens.length > 0)
 
   return (
     <div className="grid gap-4">
@@ -93,7 +95,7 @@ export function Numeros({ numeros, clientes, podeAdministrar, aoRenomear, aoAdot
         <Cartao key={g.origem}>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             {TITULO[g.origem]}
-            <Selo tom={g.origem === 'sumido' ? 'perigo' : 'neutro'}>{g.itens.length}</Selo>
+            <Selo>{g.itens.length}</Selo>
           </h3>
           <Ajuda>{EXPLICACAO[g.origem]}</Ajuda>
 
@@ -152,8 +154,8 @@ function Linha({
   const [projetoId, setProjetoId] = useState('')
 
   const projetos = clientes.find((c) => c.id === clienteId)?.projetos ?? []
-  // Número que não existe no Twilio não tem nome lá para trocar.
-  const podeRenomear = n.origem !== 'sumido' && Boolean(n.sid)
+  // Sem SID não há o que renomear no Twilio.
+  const podeRenomear = Boolean(n.sid)
 
   return (
     <li className="p-3">
@@ -202,8 +204,6 @@ function Linha({
         <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px]">
           {n.apelido ? (
             <span>{n.apelido}</span>
-          ) : n.origem === 'sumido' ? (
-            <span className="text-[var(--color-perigo)]">não existe na conta do Twilio</span>
           ) : (
             <span className="text-[var(--color-alerta)]">sem nome no Twilio</span>
           )}

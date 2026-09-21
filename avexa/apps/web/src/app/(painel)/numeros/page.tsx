@@ -68,7 +68,10 @@ export default async function PaginaNumeros() {
     <Moldura>
       <div className="mt-5">
         <Numeros
-          numeros={inventario.numeros}
+          // Número que só existe na nossa tabela não entra: a tela é sobre a
+          // conta do Twilio. Filtrado aqui para não mandar ao navegador linha
+          // que ninguém vê.
+          numeros={inventario.numeros.filter((n) => n.origem !== 'sumido')}
           clientes={clientes.map((c) => ({
             ...c,
             projetos: projetos.filter((p) => p.clienteId === c.id).map(({ id, nome }) => ({ id, nome })),
