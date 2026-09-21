@@ -3,7 +3,15 @@ import Link from 'next/link'
 import { CalendarCheck } from 'lucide-react'
 import { sessaoAtual } from '@/lib/auth'
 import { dicionarioDe } from '@/i18n/dicionario'
-import { clientePadrao, listarClientes, listarLeads, type LeadNaLista } from '@/lib/dados'
+import {
+  clientePadrao,
+  listarClientes,
+  listarLeads,
+  resumoDeLeads,
+  type LeadNaLista,
+} from '@/lib/dados'
+import { periodoValido } from '@/lib/resumo'
+import { ResumoLeads } from '@/componentes/resumo-leads'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
 import { CORES } from '@/lib/utils'
 
@@ -35,7 +43,7 @@ const qualificadoSemSaida = (l: LeadNaLista) =>
 export default async function PaginaLeads({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string }>
+  searchParams: Promise<{ cliente?: string; dias?: string }>
 }) {
   const s = await sessaoAtual()
   if (!s) redirect('/entrar')
@@ -48,8 +56,17 @@ export default async function PaginaLeads({
   const cli = await clientePadrao(s, q.cliente)
   if (!cli) return <p className="p-8 text-sm text-[var(--color-tinta-3)]">Nenhum cliente.</p>
 
-  const leads = await listarLeads(s, cli.id)
+  const periodo = periodoValido(q.dias)
+  const [leads, resumo] = await Promise.all([
+    listarLeads(s, cli.id, periodo),
+    resumoDeLeads(s, cli.id, periodo),
+  ])
   const detalhe = !s.permissoes.escopoCliente
+
+  // Preserva o cliente escolhido ao trocar de período, senão o operador que
+  // está olhando um cliente específico volta para o primeiro da lista.
+  const linkDoPeriodo = (dias: number) =>
+    s.permissoes.escopoCliente ? `/leads?dias=${dias}` : `/leads?cliente=${cli.slug}&dias=${dias}`
 
   // No fuso do cliente, não no do lead: quem lê esta tela é o time que vai
   // entrar na reunião.
@@ -104,9 +121,13 @@ export default async function PaginaLeads({
         {cli.dryRun && <Selo tom="alerta">modo seco</Selo>}
       </div>
 
+      {resumo && <ResumoLeads resumo={resumo} periodo={periodo} href={linkDoPeriodo} />}
+
       {leads.length === 0 ? (
         <Cartao>
-          <p className="text-sm text-[var(--color-tinta-3)]">{t['leads.vazio']}</p>
+          <p className="text-sm text-[var(--color-tinta-3)]">
+            Nenhum lead nos últimos {periodo} dias.
+          </p>
           <p className="mt-2 text-xs leading-relaxed text-[var(--color-tinta-3)]">
             Os leads chegam pela URL de webhook que o cliente colou na saída do formulário dele.
           </p>
@@ -240,6 +261,14 @@ export default async function PaginaLeads({
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* A lista para em 100 linhas. Sem este aviso, o resumo diria 140 leads
+          em cima de uma tabela com 100 e nada explicaria a diferença. */}
+      {resumo && resumo.total > leads.length && (
+        <p className="mt-3 text-xs text-[var(--color-tinta-3)]">
+          Mostrando os {leads.length} mais recentes de {resumo.total} leads no período.
+        </p>
       )}
     </div>
   )

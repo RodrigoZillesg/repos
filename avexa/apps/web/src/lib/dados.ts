@@ -16,7 +16,8 @@ import {
   template,
   tentativa,
 } from '@avexa/db'
-import type { Grafo } from '@avexa/core'
+import { CORTE_QUALIFICADO, type Grafo } from '@avexa/core'
+import type { NumeroDoResumo, Periodo } from './resumo'
 import type { Sessao } from './auth'
 
 /** Consultas do painel.
@@ -165,7 +166,12 @@ export interface LeadNaLista {
   reuniao: ReuniaoDoLead | null
 }
 
-export async function listarLeads(s: Sessao, clienteId: string, limite = 100): Promise<LeadNaLista[]> {
+export async function listarLeads(
+  s: Sessao,
+  clienteId: string,
+  dias?: number,
+  limite = 100,
+): Promise<LeadNaLista[]> {
   if (!s.permissoes.verLeads) return []
   // O papel cliente só enxerga o próprio cliente, venha o que vier na URL.
   const alvo = s.permissoes.escopoCliente ? s.clienteId : clienteId
@@ -187,7 +193,14 @@ export async function listarLeads(s: Sessao, clienteId: string, limite = 100): P
       criadoEm: lead.criadoEm,
     })
     .from(lead)
-    .where(eq(lead.clienteId, alvo))
+    // A mesma janela do resumo no topo. Resumo de 30 dias em cima de uma lista
+    // sem recorte mostraria "12 leads" acima de uma tabela com 80 linhas, e
+    // quem lê não tem como saber qual dos dois está certo.
+    .where(
+      dias
+        ? and(eq(lead.clienteId, alvo), gte(lead.criadoEm, new Date(Date.now() - dias * 86_400_000)))
+        : eq(lead.clienteId, alvo),
+    )
     .orderBy(desc(lead.criadoEm))
     .limit(limite)
 
@@ -484,5 +497,110 @@ export async function resumoMonitor(
       .sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime())
       .slice(0, 10)
       .map((e) => ({ destino: e.destino, erro: e.erro, quando: e.criadoEm })),
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Resumo da tela de leads
+ * ------------------------------------------------------------------------- */
+
+export interface ResumoDeLeads {
+  dias: number
+  recebidos: NumeroDoResumo
+  qualificados: NumeroDoResumo
+  reunioes: NumeroDoResumo
+  entregues: NumeroDoResumo
+  /** Quantos leads existem no período, para a lista dizer que está truncada. */
+  total: number
+}
+
+/** Os quatro números que respondem "o que aconteceu com os meus leads".
+ *
+ *  Consulta própria, e não o `resumoMonitor`: aquele é a tela de diagnóstico da
+ *  operação — carrega erro de provedor, execuções travadas e uma contagem de
+ *  supressão que não é escopada por cliente. Nada disso pode aparecer para o
+ *  cliente final. E ele também não tem o número que mais importa aqui, que é
+ *  reunião marcada.
+ *
+ *  A reunião conta pela data em que foi MARCADA, não pela data em que acontece:
+ *  o trabalho foi feito no período, mesmo que a conversa seja no mês que vem. */
+export async function resumoDeLeads(
+  s: Sessao,
+  clienteId: string,
+  dias: Periodo = 30,
+): Promise<ResumoDeLeads | null> {
+  if (!s.permissoes.verLeads) return null
+  // Mesmo estreitamento da lista: o papel cliente nunca sai do próprio cliente,
+  // venha o que vier na URL.
+  const alvo = s.permissoes.escopoCliente ? s.clienteId : clienteId
+  if (!alvo) return null
+
+  const d = db()
+  const agora = Date.now()
+  const inicio = new Date(agora - dias * 86_400_000)
+  const inicioAnterior = new Date(agora - 2 * dias * 86_400_000)
+
+  // Uma leitura só, cobrindo os dois períodos, e a divisão é feita aqui: duas
+  // idas ao banco por métrica seriam oito consultas para quatro números.
+  const [leads, reunioes, entregas] = await Promise.all([
+    d
+      .select({ criadoEm: lead.criadoEm, score: lead.score })
+      .from(lead)
+      .where(and(eq(lead.clienteId, alvo), gte(lead.criadoEm, inicioAnterior))),
+    d
+      .select({ criadoEm: reuniao.criadoEm })
+      .from(reuniao)
+      .where(
+        and(
+          eq(reuniao.clienteId, alvo),
+          eq(reuniao.status, 'marcada'),
+          gte(reuniao.criadoEm, inicioAnterior),
+        ),
+      ),
+    d
+      .select({ leadId: entrega.leadId, criadoEm: entrega.criadoEm })
+      .from(entrega)
+      .where(
+        and(
+          eq(entrega.clienteId, alvo),
+          eq(entrega.estado, 'entregue'),
+          gte(entrega.criadoEm, inicioAnterior),
+        ),
+      ),
+  ])
+
+  const noPeriodo = <T extends { criadoEm: Date }>(linhas: T[]) =>
+    linhas.filter((l) => l.criadoEm >= inicio)
+  const noAnterior = <T extends { criadoEm: Date }>(linhas: T[]) =>
+    linhas.filter((l) => l.criadoEm < inicio)
+
+  // Sem nada no período anterior não há comparação honesta a fazer. O primeiro
+  // mês de um cliente mostraria "+100%" em tudo, que é ruído com cara de
+  // resultado.
+  const houveAnterior =
+    noAnterior(leads).length > 0 || noAnterior(reunioes).length > 0 || noAnterior(entregas).length > 0
+
+  const par = (atual: number, anterior: number): NumeroDoResumo => ({
+    valor: atual,
+    anterior: houveAnterior ? anterior : null,
+  })
+
+  const qualificado = (l: { score: number | null }) => (l.score ?? 0) >= CORTE_QUALIFICADO
+
+  // Leads distintos, não linhas de entrega: um lead vai para o CRM, para o
+  // webhook e sobe de novo a cada remarcação. Contar linhas faria "entregues"
+  // passar de "recebidos" na mesma tela.
+  const distintos = (linhas: Array<{ leadId: string }>) => new Set(linhas.map((e) => e.leadId)).size
+
+  return {
+    dias,
+    recebidos: par(noPeriodo(leads).length, noAnterior(leads).length),
+    qualificados: par(
+      noPeriodo(leads).filter(qualificado).length,
+      noAnterior(leads).filter(qualificado).length,
+    ),
+    reunioes: par(noPeriodo(reunioes).length, noAnterior(reunioes).length),
+    entregues: par(distintos(noPeriodo(entregas)), distintos(noAnterior(entregas))),
+    total: noPeriodo(leads).length,
   }
 }

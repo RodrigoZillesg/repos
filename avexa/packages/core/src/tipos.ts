@@ -49,6 +49,17 @@ export interface LimitesMotor {
   profundidadeMaxSubfluxo: number
 }
 
+/** A partir de qual score um lead conta como qualificado.
+ *
+ *  Estava escrito à mão em três lugares — a entrega ao CRM, a lista de leads e
+ *  o padrão do nó de qualificação. Três cópias de um número que decide se o
+ *  lead vai para o time é como nasce a divergência que ninguém vê: a tela diz
+ *  qualificado e a entrega discorda.
+ *
+ *  O nó de qualificação ainda pode ter corte próprio por fluxo; este é o
+ *  padrão e o que os resumos usam. */
+export const CORTE_QUALIFICADO = 60
+
 export const LIMITES_PADRAO: LimitesMotor = {
   tetoTentativas: 5,
   janelaInicioMin: 9 * 60,

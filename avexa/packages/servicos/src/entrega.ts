@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { entrega, integracao, lead as tLead, reuniao, type Db, type Lead } from '@avexa/db'
+import { CORTE_QUALIFICADO } from '@avexa/core'
 import {
   criarNota,
   salvarContato,
@@ -414,7 +415,7 @@ export async function entregarNoHubspot(
     return { ok: false, erro: conexao.erro, reenviavel: !conexao.precisaReconectar }
   }
 
-  const qualificado = (ld.score ?? 0) >= 60
+  const qualificado = (ld.score ?? 0) >= CORTE_QUALIFICADO
   const [nome, ...resto] = (ld.nome ?? '').trim().split(/\s+/)
   const props = conexao.config.propriedadesOk !== false
 
