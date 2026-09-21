@@ -74,13 +74,36 @@ for (const c of escolhidos) {
       : `${OK}modo seco desligado — os contatos saem de verdade`,
   )
 
+  // Os canais são lidos antes porque o passo do número precisa deles: um
+  // número de teste só é bloqueio se algum canal depender dele.
+  const canais = await estadoDosCanais(d, c.id)
+
   // 2. Número. O mesmo atende voz e SMS.
+  //
+  //    O `provedorSid` é o que separa um número comprado de verdade de um
+  //    número que só existe na nossa tabela. O seed popula o pool com quatro
+  //    números fictícios (faixa 555, reservada justamente para isso) para que a
+  //    ativação tenha o que reservar — e eles atravessam a tela inteira sem
+  //    levantar suspeita: aparecem atribuídos, o canal de SMS liga, o fluxo tem
+  //    a etapa, e o envio morre no Twilio com um 400. É o mesmo silêncio de
+  //    sempre, uma camada abaixo.
   const [num] = await d.select().from(numero).where(eq(numero.clienteId, c.id)).limit(1)
-  if (num) console.log(`${OK}número ${num.e164} (${num.status})`)
-  else console.log(`${NOTA}sem número — só WhatsApp e e-mail podem ser ligados`)
+  const precisaDeNumero = canais.filter((x) => x.ativo && x.numero !== null).map((x) => x.canal)
+  if (!num) {
+    console.log(`${NOTA}sem número — só WhatsApp e e-mail podem ser ligados`)
+  } else if (num.provedorSid) {
+    console.log(`${OK}número ${num.e164} (${num.status}) comprado no Twilio`)
+  } else if (precisaDeNumero.length > 0) {
+    console.log(
+      `${FALTA}número ${num.e164} não existe no Twilio (sem SID): é número de teste, ` +
+        `e nada sai por ele — ${precisaDeNumero.join(' e ')} dependem dele`,
+    )
+    pendencias.push('um número comprado de verdade')
+  } else {
+    console.log(`${NOTA}número ${num.e164} é de teste (sem SID no Twilio), mas nenhum canal usa`)
+  }
 
   // 3. Canais, com o mesmo cálculo de pré-requisito que a tela usa.
-  const canais = await estadoDosCanais(d, c.id)
   const ligados = canais.filter((x) => x.ativo)
   for (const x of canais) {
     if (x.ativo) {
