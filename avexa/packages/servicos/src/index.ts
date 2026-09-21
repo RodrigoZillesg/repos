@@ -1,5 +1,6 @@
 export * from './cripto.ts'
 export * from './acesso.ts'
+export * from './canais.ts'
 export * from './equipe.ts'
 export * from './numeros.ts'
 export * from './agente.ts'
