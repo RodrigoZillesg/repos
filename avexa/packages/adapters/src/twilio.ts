@@ -305,3 +305,89 @@ export async function apontarWebhookSms(
   })
   return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao apontar o webhook' }
 }
+
+/** Um número que a conta já possui, como o Twilio o vê.
+ *
+ *  `apelido` é o FriendlyName: é o único lugar onde está escrito de quem é o
+ *  número. Sem ele a conta é uma coluna de dígitos, e a antiga já está assim. */
+export interface NumeroDaConta {
+  sid: string
+  e164: string
+  apelido: string
+  capacidades: string[]
+  /** Para onde o Twilio entrega SMS recebido. Vazio significa que a resposta e
+   *  o opt-out do lead são recebidos e jogados fora sem aviso. */
+  webhookSms: string | null
+  webhookVoz: string | null
+}
+
+export type ResultadoInventario =
+  | { ok: true; numeros: NumeroDaConta[] }
+  | { ok: false; erro: string }
+
+const numeroDaConta = (x: Record<string, unknown>): NumeroDaConta => ({
+  sid: String(x.sid ?? ''),
+  e164: String(x.phone_number ?? ''),
+  apelido: String(x.friendly_name ?? ''),
+  capacidades: capacidadesDe(x.capabilities),
+  webhookSms: (x.sms_url as string) || null,
+  webhookVoz: (x.voice_url as string) || null,
+})
+
+/** Lista os números que a conta JÁ possui. Só leitura, não custa nada.
+ *
+ *  Segue a paginação até o fim de propósito. O Twilio devolve 50 por página e
+ *  um `next_page_uri`; parar na primeira página daria uma lista que parece
+ *  completa e não é — e o sintoma seria comprar de novo um número que já se
+ *  tem, ou não achar o número do cliente que reclamou. */
+export async function listarNumerosDaConta(
+  cred: CredenciaisTwilio,
+  limitePaginas = 20,
+): Promise<ResultadoInventario> {
+  const numeros: NumeroDaConta[] = []
+  let caminho: string | null = `/2010-04-01/Accounts/${cred.accountSid}/IncomingPhoneNumbers.json?PageSize=50`
+
+  for (let pagina = 0; caminho && pagina < limitePaginas; pagina++) {
+    const r = await requisitar(`https://api.twilio.com${caminho}`, {
+      metodo: 'GET',
+      cabecalhos: autorizacao(cred),
+      ...(cred.buscar ? { buscar: cred.buscar } : {}),
+    })
+    if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao listar os números da conta' }
+
+    const corpo = (r.corpo ?? {}) as { incoming_phone_numbers?: unknown[]; next_page_uri?: unknown }
+    const lista = corpo.incoming_phone_numbers
+    if (!Array.isArray(lista)) return { ok: false, erro: 'resposta do Twilio sem lista de números' }
+
+    for (const n of lista) numeros.push(numeroDaConta(n as Record<string, unknown>))
+    caminho = typeof corpo.next_page_uri === 'string' && corpo.next_page_uri ? corpo.next_page_uri : null
+  }
+
+  return { ok: true, numeros }
+}
+
+/** Troca o nome do número no Twilio.
+ *
+ *  O apelido é a única identificação que viaja com o número: ele aparece no
+ *  console, na fatura e em qualquer ferramenta que leia a conta. Por isso vale
+ *  a pena gravá-lo lá e não só no nosso banco — quem abre o Twilio às três da
+ *  manhã para entender uma cobrança não tem a Avexa aberta do lado. */
+export async function renomearNumero(
+  cred: CredenciaisTwilio,
+  sid: string,
+  apelido: string,
+): Promise<{ ok: boolean; erro?: string }> {
+  const nome = apelido.trim()
+  if (!nome) return { ok: false, erro: 'o apelido não pode ser vazio' }
+  // O Twilio corta em 64 caracteres sem reclamar: o nome volta diferente do que
+  // foi mandado e ninguém percebe. Melhor recusar do que gravar truncado.
+  if (nome.length > 64) return { ok: false, erro: 'o apelido do Twilio cabe em 64 caracteres' }
+
+  const r = await requisitar(`${base(cred)}/IncomingPhoneNumbers/${sid}.json`, {
+    cabecalhos: autorizacao(cred),
+    corpo: { FriendlyName: nome },
+    formulario: true,
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao renomear o número' }
+}

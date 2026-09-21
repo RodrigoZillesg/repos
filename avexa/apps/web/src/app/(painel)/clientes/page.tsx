@@ -1,11 +1,18 @@
 import { redirect } from 'next/navigation'
 import { db } from '@avexa/db'
-import { estadoDosCanais, type CadastroDoCliente } from '@avexa/servicos'
+import { estadoDosCanais, listarProjetos, type CadastroDoCliente } from '@avexa/servicos'
 import { sessaoAtual } from '@/lib/auth'
 import { clientePadrao, listarClientes } from '@/lib/dados'
 import { Cartao } from '@/componentes/ui/cartao'
 import { Cliente } from '@/componentes/cliente'
-import { alternarCanal, salvarCadastro } from './acoes'
+import { Projetos } from '@/componentes/projetos'
+import {
+  alternarCanal,
+  arquivarProjetoAcao,
+  criarProjetoAcao,
+  renomearProjetoAcao,
+  salvarCadastro,
+} from './acoes'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +46,7 @@ export default async function PaginaClientes({
     )
   }
 
-  const canais = await estadoDosCanais(db(), c.id)
+  const [canais, projetos] = await Promise.all([estadoDosCanais(db(), c.id), listarProjetos(db(), c.id)])
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6 lg:p-8">
@@ -81,6 +88,17 @@ export default async function PaginaClientes({
           podeAdministrar={s.permissoes.administrar}
           aoSalvar={salvarCadastro}
           aoAlternarCanal={alternarCanal}
+        />
+      </div>
+
+      <div className="mt-4">
+        <Projetos
+          clienteId={c.id}
+          projetos={projetos}
+          podeAdministrar={s.permissoes.administrar}
+          aoCriar={criarProjetoAcao}
+          aoRenomear={renomearProjetoAcao}
+          aoArquivar={arquivarProjetoAcao}
         />
       </div>
     </div>

@@ -3,10 +3,14 @@
 import { revalidatePath } from 'next/cache'
 import { auditoria, db } from '@avexa/db'
 import {
+  arquivarProjeto,
+  criarProjeto,
   definirCanal,
+  renomearProjeto,
   salvarCliente,
   type CadastroDoCliente,
   type ResultadoCanal,
+  type ResultadoProjeto,
 } from '@avexa/servicos'
 import type { Canal } from '@avexa/core'
 import { sessaoAtual } from '@/lib/auth'
@@ -74,5 +78,84 @@ export async function alternarCanal(
   // reclama, então as duas telas precisam relerem.
   revalidatePath('/clientes')
   revalidatePath('/fluxos')
+  return r
+}
+
+/** Projetos do cliente.
+ *
+ *  O projeto existe para dar nome ao número de telefone no Twilio. Criar e
+ *  renomear não mexem em nada que esteja no ar — mas ficam em auditoria porque
+ *  o nome é o que alguém vai ler na fatura tentando entender uma cobrança. */
+
+export async function criarProjetoAcao(
+  clienteId: string,
+  nome: string,
+): Promise<ResultadoProjeto> {
+  const s = await exigirAdmin()
+  if (!s) return { ok: false, erro: 'sem permissão' }
+
+  const r = await criarProjeto(db(), clienteId, nome)
+  if (!r.ok) return r
+
+  await db().insert(auditoria).values({
+    usuarioId: s.usuarioId,
+    clienteId,
+    acao: 'projeto.criar',
+    entidade: 'projeto',
+    entidadeId: r.id,
+    detalhe: { nome, por: s.email },
+  })
+
+  revalidatePath('/clientes')
+  revalidatePath('/numeros')
+  return r
+}
+
+export async function renomearProjetoAcao(
+  clienteId: string,
+  projetoId: string,
+  nome: string,
+): Promise<ResultadoProjeto> {
+  const s = await exigirAdmin()
+  if (!s) return { ok: false, erro: 'sem permissão' }
+
+  const r = await renomearProjeto(db(), projetoId, nome)
+  if (!r.ok) return r
+
+  await db().insert(auditoria).values({
+    usuarioId: s.usuarioId,
+    clienteId,
+    acao: 'projeto.renomear',
+    entidade: 'projeto',
+    entidadeId: projetoId,
+    detalhe: { nome, por: s.email },
+  })
+
+  revalidatePath('/clientes')
+  revalidatePath('/numeros')
+  return r
+}
+
+export async function arquivarProjetoAcao(
+  clienteId: string,
+  projetoId: string,
+): Promise<ResultadoProjeto> {
+  const s = await exigirAdmin()
+  if (!s) return { ok: false, erro: 'sem permissão' }
+
+  const r = await arquivarProjeto(db(), projetoId)
+  if (!r.ok) return r
+
+  await db().insert(auditoria).values({
+    usuarioId: s.usuarioId,
+    clienteId,
+    acao: 'projeto.arquivar',
+    entidade: 'projeto',
+    entidadeId: projetoId,
+    detalhe: { por: s.email },
+  })
+
+  revalidatePath('/clientes')
+  revalidatePath('/numeros')
   return r
 }

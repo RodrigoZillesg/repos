@@ -18,6 +18,7 @@ export default async function LayoutPainel({ children }: { children: React.React
   const abas = [
     { href: '/ativar', rotulo: t('nav.ativar'), visivel: s.permissoes.verClientes },
     { href: '/clientes', rotulo: 'Clientes', visivel: s.permissoes.verClientes },
+    { href: '/numeros', rotulo: 'Números', visivel: s.permissoes.verClientes },
     { href: '/fluxos', rotulo: t('nav.fluxos'), visivel: s.permissoes.verFluxos },
     { href: '/templates', rotulo: t('nav.templates'), visivel: s.permissoes.templates.length > 0 },
     { href: '/leads', rotulo: t('nav.leads'), visivel: s.permissoes.verLeads },

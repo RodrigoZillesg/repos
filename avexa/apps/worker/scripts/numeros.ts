@@ -5,6 +5,7 @@
  *  se comprometer.
  *
  *      pnpm --filter @avexa/worker numeros listar
+ *      pnpm --filter @avexa/worker numeros reais
  *      pnpm --filter @avexa/worker numeros procurar AU
  *      pnpm --filter @avexa/worker numeros comprar AU [slug-do-cliente]
  *      pnpm --filter @avexa/worker numeros webhooks
@@ -14,6 +15,7 @@ import { cliente, db, numero } from '@avexa/db'
 import { buscarNumerosDisponiveis, type TipoDeNumero } from '@avexa/adapters'
 import {
   credenciaisDoAmbiente,
+  inventarioDeNumeros,
   provisionarNumero,
   reapontarWebhooks,
   webhookDeSms,
@@ -42,6 +44,43 @@ const cred = credenciaisDoAmbiente()
 if (!cred) {
   console.error('faltam TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no ambiente')
   process.exit(1)
+}
+
+/** O que a conta do Twilio tem de verdade, ao lado do que a Avexa acha que tem.
+ *
+ *  `listar` mostra a nossa tabela; este mostra a conta. Os dois divergem, e a
+ *  divergência é o que interessa: número que existe lá e não aqui é da operação
+ *  antiga, e número que existe aqui e não lá não manda nada. */
+if (comando === 'reais') {
+  const r = await inventarioDeNumeros(d, cred)
+  if (!r.ok) {
+    console.error(`não deu para ler a conta do Twilio: ${r.erro}`)
+    process.exit(1)
+  }
+
+  const rotulo = { avexa: 'avexa ', fora: 'FORA  ', sumido: 'SUMIDO' } as const
+  for (const n of r.numeros) {
+    const dono = n.clienteNome
+      ? `${n.clienteNome}${n.projetoNome ? ` · ${n.projetoNome}` : ''}`
+      : ''
+    console.log(`${rotulo[n.origem]} ${n.e164.padEnd(15)} ${n.apelido || '(sem nome)'}`)
+    if (dono) console.log(`       ${' '.repeat(15)} na Avexa: ${dono}`)
+    if (n.foraDoPadrao && n.apelidoSugerido) {
+      console.log(`       ${' '.repeat(15)} sugerido: ${n.apelidoSugerido}`)
+    }
+    if (n.origem === 'sumido') {
+      console.log(`       ${' '.repeat(15)} NÃO EXISTE no Twilio — nada sai por ele`)
+    }
+  }
+
+  const sumidos = r.numeros.filter((n) => n.origem === 'sumido').length
+  console.log(
+    `\n${r.numeros.length} número(s): ` +
+      `${r.numeros.filter((n) => n.origem === 'avexa').length} da Avexa, ` +
+      `${r.numeros.filter((n) => n.origem === 'fora').length} de fora, ` +
+      `${sumidos} sumido(s).`,
+  )
+  process.exit(sumidos > 0 ? 1 : 0)
 }
 
 if (comando === 'procurar') {
@@ -150,5 +189,5 @@ if (comando === 'webhooks') {
   process.exit(saida.some((s) => !s.ok) ? 1 : 0)
 }
 
-console.error('uso: numeros listar | procurar <pais> | comprar <pais> [slug] | webhooks')
+console.error('uso: numeros listar | reais | procurar <pais> | comprar <pais> [slug] | webhooks')
 process.exit(1)

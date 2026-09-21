@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   index,
@@ -47,6 +48,38 @@ export const cliente = pgTable(
   (t) => [uniqueIndex('cliente_slug_idx').on(t.slug)],
 )
 
+/** Frente de trabalho dentro de um cliente.
+ *
+ *  Um cliente contrata mais de uma coisa ao mesmo tempo — duas escolas da mesma
+ *  rede, duas campanhas, dois idiomas — e cada frente tem o próprio número de
+ *  telefone. Sem isto, todo número de um cliente se chama igual, e a lista no
+ *  console do Twilio vira uma coluna de números idênticos de nome, que é
+ *  exatamente o problema que já existe na conta antiga.
+ *
+ *  É deliberadamente magro: nome e dono. Não é um segundo tenant — fluxo, lead
+ *  e execução continuam pendurados no cliente. O que o projeto faz hoje é dar
+ *  nome próprio a um número. */
+export const projeto = pgTable(
+  'projeto',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    clienteId: uuid()
+      .notNull()
+      .references(() => cliente.id, { onDelete: 'cascade' }),
+    nome: text().notNull(),
+    /** Projeto encerrado some das listas de escolha sem sumir dos números que
+     *  já carregam o nome dele. Apagar quebraria o histórico. */
+    ativo: boolean().notNull().default(true),
+    criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Sem distinguir maiúscula: "Path A" e "path a" são o mesmo projeto, e dois
+    // deles dariam dois apelidos iguais no Twilio para números diferentes.
+    uniqueIndex('projeto_nome_idx').on(t.clienteId, sql`lower(${t.nome})`),
+    index('projeto_cliente_idx').on(t.clienteId),
+  ],
+)
+
 /** Canais contratados por cliente. Um nó de canal desligado aqui aparece como
  *  "off" no construtor e não pode ser inserido. */
 export const clienteCanal = pgTable(
@@ -77,6 +110,10 @@ export const numero = pgTable(
     capacidades: jsonb().$type<string[]>().notNull().default(['voz', 'sms']),
     status: numeroStatusEnum().notNull().default('livre'),
     clienteId: uuid().references(() => cliente.id, { onDelete: 'set null' }),
+    /** Frente do cliente que fala por este número. É o que dá nome ao número no
+     *  console do Twilio. Nulo enquanto o número está no pool, e ao apagar o
+     *  projeto o número continua nosso — só perde o nome. */
+    projetoId: uuid().references(() => projeto.id, { onDelete: 'set null' }),
     /** Id do assistente de voz (Vapi) configurado para este número. */
     assistenteId: text(),
     criadoEm: timestamp({ withTimezone: true }).notNull().defaultNow(),
