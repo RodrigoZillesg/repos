@@ -143,3 +143,68 @@ export function aplanar(grafo: Grafo): GrafoDesenhado {
 
 /** O nó por onde a execução entra. É de onde o desenho começa. */
 export const entradaDoGrafo = (g: Grafo): string | null => g[0]?.id ?? null
+
+/** Completa o caminho percorrido, incluindo as etapas que decidem em silêncio.
+ *
+ *  O simulador só emite evento para etapa que faz alguma coisa visível. Uma
+ *  `entrada`, uma `guarda` e uma `condicao` são atravessadas sem emitir nada —
+ *  então, olhando só os eventos, elas parecem não ter sido percorridas.
+ *
+ *  Isso importa porque o desenho usa essa informação para esmaecer quem ficou
+ *  de fora do caminho. Sem preencher, a tela diria que o lead não passou pela
+ *  guarda — quando ele passou, e foi ela que decidiu deixá-lo seguir. Um
+ *  desenho que mente sobre o caminho é pior que um desenho sem caminho.
+ *
+ *  Preenche pelo menor caminho entre cada par consecutivo de etapas que
+ *  emitiram: é o que o motor fez, já que ele nunca volta atrás a não ser pela
+ *  aresta de volta de uma repetição. */
+export function preencherPercurso(g: GrafoDesenhado, emitidas: readonly string[]): Set<string> {
+  const existe = new Set(g.nos.map((n) => n.id))
+  const marco = emitidas.filter((id) => existe.has(id))
+  if (marco.length === 0) return new Set()
+
+  const saem = new Map<string, string[]>()
+  for (const a of g.arestas) saem.set(a.de, [...(saem.get(a.de) ?? []), a.para])
+
+  /** Menor caminho de `de` até `para`, inclusive as duas pontas. */
+  function caminho(de: string, para: string): string[] {
+    if (de === para) return [de]
+    const veioDe = new Map<string, string>()
+    const vistos = new Set([de])
+    const fila = [de]
+    while (fila.length > 0) {
+      const atual = fila.shift()!
+      for (const seguinte of saem.get(atual) ?? []) {
+        if (vistos.has(seguinte)) continue
+        vistos.add(seguinte)
+        veioDe.set(seguinte, atual)
+        if (seguinte === para) {
+          const volta = [para]
+          let cursor = para
+          while (cursor !== de) {
+            cursor = veioDe.get(cursor)!
+            volta.push(cursor)
+          }
+          return volta.reverse()
+        }
+        fila.push(seguinte)
+      }
+    }
+    // Sem caminho: devolve as pontas e não inventa nada no meio.
+    return [de, para]
+  }
+
+  const percorridas = new Set<string>(marco)
+  for (let i = 0; i < marco.length - 1; i++) {
+    for (const id of caminho(marco[i]!, marco[i + 1]!)) percorridas.add(id)
+  }
+
+  // O começo do fluxo até a primeira etapa que emitiu: o lead atravessou tudo
+  // isso para chegar lá.
+  const entrada = g.nos[0]?.id
+  if (entrada && entrada !== marco[0]) {
+    for (const id of caminho(entrada, marco[0]!)) percorridas.add(id)
+  }
+
+  return percorridas
+}

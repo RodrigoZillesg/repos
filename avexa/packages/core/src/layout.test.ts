@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { aplanar } from './layout.ts'
+import { aplanar, preencherPercurso } from './layout.ts'
 import { PERSONAS, simular, type Persona } from './simulador.ts'
 import type { Etapa, Grafo } from './tipos.ts'
 
@@ -209,4 +209,50 @@ test('a junção é o que torna o ramo alcançável adiante', () => {
   const g = aplanar(COMPLETO)
   assert.ok(alcanca(g, 'sms', 'entrega'), 'quem entra pelo ramo não pode ficar preso nele')
   assert.ok(alcanca(g, 'agenda', 'entrega'))
+})
+
+/* --------------------- O caminho percorrido, preenchido -------------------- */
+
+test('a guarda atravessada entra no caminho, mesmo sem emitir evento', () => {
+  // O bug que isto conserta: a tela esmaecia a guarda como se o lead não
+  // tivesse passado por ela — quando foi ela que decidiu deixá-lo seguir.
+  const g = aplanar(COMPLETO)
+  const percorrido = preencherPercurso(g, ['wa', 'liga'])
+  assert.ok(percorrido.has('entrada'), 'a entrada é por onde todo lead passa')
+  assert.ok(percorrido.has('guarda'), 'a guarda foi atravessada')
+  assert.ok(percorrido.has('cond'), 'a condição decidiu em silêncio, mas decidiu')
+})
+
+test('o que ficou fora do caminho continua fora', () => {
+  const g = aplanar(COMPLETO)
+  const percorrido = preencherPercurso(g, ['wa', 'liga'])
+  assert.equal(percorrido.has('sms'), false, 'o outro ramo não foi percorrido')
+})
+
+test('sem simulação, ninguém é marcado', () => {
+  // Zero é diferente de "tudo apagado": antes de simular, nada se esmaece.
+  assert.equal(preencherPercurso(aplanar(COMPLETO), []).size, 0)
+})
+
+test('id que não existe no desenho é ignorado, não quebra', () => {
+  // O `—` do simulador, e qualquer id de uma versão anterior do fluxo.
+  const g = aplanar(COMPLETO)
+  assert.equal(preencherPercurso(g, ['—', 'fantasma']).size, 0)
+  assert.ok(preencherPercurso(g, ['—', 'wa']).has('wa'))
+})
+
+test('o caminho preenchido bate com o que o motor executou', () => {
+  // Fecha o ciclo: todo nó marcado precisa ser alcançável a partir da entrada,
+  // senão o preenchimento estaria acendendo etapa que o lead não viu.
+  const g = aplanar(COMPLETO)
+  for (const persona of Object.keys(PERSONAS) as Persona[]) {
+    const emitidas = simular(COMPLETO, persona).eventos.map((ev) => ev.etapaId)
+    for (const id of preencherPercurso(g, emitidas)) {
+      if (id === 'entrada') continue
+      assert.ok(
+        alcanca(g, 'entrada', id),
+        `persona ${persona}: ${id} foi marcado como percorrido e não é alcançável da entrada`,
+      )
+    }
+  }
 })

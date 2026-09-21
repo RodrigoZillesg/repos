@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import {
   PERSONAS,
@@ -28,6 +28,9 @@ interface Props {
   fuso: string
   t: Record<Chave, string>
   aoFechar: () => void
+  /** As etapas por onde a simulação passou, para o canvas acender o caminho.
+   *  O dado sempre existiu em `EventoSimulado.etapaId` e morria nesta tela. */
+  aoPercurso?: (etapas: Set<string>) => void
 }
 
 /** Console de simulação.
@@ -61,6 +64,15 @@ export function Simulacao(p: Props) {
       return { erro: e instanceof Error ? e.message : String(e) } as const
     }
   }, [p.grafo, persona, canaisAtivos, p.limites, p.fuso])
+
+  // Avisa quem desenha por onde o lead passou. Em efeito, e não durante o
+  // render, porque isto altera o estado de um componente acima.
+  const aoPercurso = p.aoPercurso
+  useEffect(() => {
+    if (!aoPercurso) return
+    if (!('eventos' in resultado)) return aoPercurso(new Set())
+    aoPercurso(new Set(resultado.eventos.map((e) => e.etapaId).filter((id) => id !== '—')))
+  }, [resultado, aoPercurso])
 
   const inicio = 'eventos' in resultado ? resultado.eventos[0]?.instante : undefined
 

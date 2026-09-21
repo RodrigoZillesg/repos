@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { Plus, Redo2, TriangleAlert, Undo2, X } from 'lucide-react'
+import { List, Plus, Redo2, TriangleAlert, Undo2, Workflow, X } from 'lucide-react'
 import {
   ETAPAS,
   GRUPOS,
@@ -15,6 +15,7 @@ import {
   type TipoEtapa,
 } from '@avexa/core'
 import { Simulacao } from '@/componentes/simulacao'
+import { CanvasFluxo } from '@/componentes/canvas-fluxo'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
@@ -90,6 +91,12 @@ export function Construtor(p: Props) {
   const [refazer, setRefazer] = useState<Grafo[]>([])
   /** Achados da última publicação, que carregam `etapaId` do servidor. */
   const [doServidor, setDoServidor] = useState<Achado[]>([])
+  /** Lista ou canvas. A lista continua sendo de primeira classe: é a superfície
+   *  navegável por teclado, e quem revisa um fluxo longo lê melhor nela. */
+  const [visao, setVisao] = useState<'lista' | 'canvas'>('canvas')
+  /** Etapas por onde a última simulação passou. `EventoSimulado.etapaId` sempre
+   *  existiu e nunca tinha chegado ao desenho. */
+  const [percorridas, setPercorridas] = useState<Set<string>>(new Set())
 
   const selecionada = useMemo(() => (sel ? achar(grafo, sel) : null), [grafo, sel])
 
@@ -243,6 +250,29 @@ export function Construtor(p: Props) {
             <Selo tom="alerta">{quantosAvisos} com aviso</Selo>
           )}
           <div className="ml-auto flex gap-2">
+            <div className="flex overflow-hidden rounded-lg border">
+              {(['canvas', 'lista'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setVisao(v)}
+                  aria-pressed={visao === v}
+                  className={cn(
+                    'px-2.5 py-1 text-[12px]',
+                    visao === v
+                      ? 'bg-[var(--color-acento-suave)] text-[var(--color-acento)]'
+                      : 'text-[var(--color-tinta-2)]',
+                  )}
+                >
+                  {v === 'canvas' ? (
+                    <Workflow aria-hidden className="h-3.5 w-3.5" />
+                  ) : (
+                    <List aria-hidden className="h-3.5 w-3.5" />
+                  )}
+                  <span className="sr-only">{v === 'canvas' ? 'Ver como fluxo' : 'Ver como lista'}</span>
+                </button>
+              ))}
+            </div>
             {p.podeEditar && (
               <>
                 <Botao
@@ -290,6 +320,18 @@ export function Construtor(p: Props) {
           </div>
         </div>
 
+        {visao === 'canvas' ? (
+          <div className="min-h-0 flex-1">
+            <CanvasFluxo
+              grafo={grafo}
+              sel={sel}
+              canais={p.canais}
+              porEtapa={porEtapa}
+              percorridas={percorridas}
+              aoSelecionar={setSel}
+            />
+          </div>
+        ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <Pilha
             lista={grafo}
@@ -327,6 +369,7 @@ export function Construtor(p: Props) {
             </ul>
           )}
         </div>
+        )}
       </div>
 
       {/* Inspetor da etapa */}
@@ -377,6 +420,7 @@ export function Construtor(p: Props) {
           limites={p.limites}
           fuso={p.fuso}
           t={p.t}
+          aoPercurso={setPercorridas}
           aoFechar={() => setSimulando(false)}
         />
       )}

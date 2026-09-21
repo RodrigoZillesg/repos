@@ -1,4 +1,10 @@
 @import 'tailwindcss';
+/* O canvas do construtor. Precisa vir aqui, e não dentro do componente: em
+   Tailwind v4 todo `@import` tem que preceder qualquer outra regra. `base.css`
+   em vez de `style.css` porque traz só o funcional — a pintura é nossa. E
+   `layer(base)` para o Preflight e as nossas utilities terem precedência, em
+   vez de virar caça à especificidade depois. */
+@import '@xyflow/react/dist/base.css' layer(base);
 
 /* Identidade do Avexa.
    Reinterpretação do artefato em tokens: fundo quase neutro com um leve desvio
@@ -91,5 +97,28 @@
   :focus-visible {
     outline: 2px solid var(--color-acento);
     outline-offset: 2px;
+  }
+}
+
+/* O canvas herda o tema pelos nossos tokens, em vez da prop `colorMode` do
+   React Flow — que ignoraria isto e criaria uma segunda fonte de verdade. */
+@layer base {
+  .react-flow {
+    --xy-background-color: var(--color-fundo);
+    --xy-background-pattern-color: var(--color-borda);
+    --xy-edge-stroke: var(--color-tinta-3);
+    --xy-edge-stroke-selected: var(--color-acento);
+    --xy-node-border: var(--color-borda);
+    --xy-node-background-color: var(--color-superficie);
+    --xy-node-color: var(--color-tinta);
+    --xy-handle-background-color: var(--color-tinta-3);
+    --xy-handle-border-color: var(--color-superficie);
+    --xy-controls-button-background-color: var(--color-superficie);
+    --xy-controls-button-background-color-hover: var(--color-acento-suave);
+    --xy-controls-button-color: var(--color-tinta-2);
+    --xy-controls-button-color-hover: var(--color-acento);
+    --xy-controls-button-border-color: var(--color-borda);
+    --xy-minimap-background-color: var(--color-superficie);
+    --xy-minimap-mask-background-color: color-mix(in oklch, var(--color-fundo) 70%, transparent);
   }
 }

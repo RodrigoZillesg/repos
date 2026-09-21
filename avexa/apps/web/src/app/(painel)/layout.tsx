@@ -34,7 +34,13 @@ export default async function LayoutPainel({ children }: { children: React.React
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    // Altura exata da tela, e a rolagem vive dentro do `main`.
+    //
+    // Com `min-h-dvh` a raiz crescia com o conteúdo, e o construtor — que
+    // precisa ocupar o que sobra e nada mais — empurrava a página para além do
+    // viewport: o canvas ficava com metade do fluxo abaixo da dobra. As demais
+    // telas rolam igual, só que dentro do `main` em vez do corpo.
+    <div className="flex h-dvh flex-col overflow-hidden">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-[var(--color-superficie)] px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <span
@@ -69,7 +75,7 @@ export default async function LayoutPainel({ children }: { children: React.React
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
     </div>
   )
 }
