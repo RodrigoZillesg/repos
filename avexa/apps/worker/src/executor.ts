@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { criarAdaptador } from '@avexa/adapters'
 import {
   avancar,
@@ -580,13 +580,22 @@ async function executarSubfluxo(
   etapa: Etapa,
   limites: LimitesMotor,
 ): Promise<boolean> {
-  const nome = etapa.cfg.alvo
-  if (!nome) return false
+  const alvoCfg = etapa.cfg.alvo
+  if (!alvoCfg) return false
 
+  // Por id, e por nome como reserva: `cfg.alvo` guardou nome enquanto o select
+  // do construtor não tinha `value`, e fluxos publicados naquele formato
+  // continuam no banco. Por id é o formato bom — renomear o fluxo deixa de
+  // quebrar esta chamada.
   const [alvo] = await amb.db
     .select()
     .from(tFluxo)
-    .where(and(eq(tFluxo.clienteId, ex.clienteId), eq(tFluxo.nome, nome)))
+    .where(
+      and(
+        eq(tFluxo.clienteId, ex.clienteId),
+        or(eq(tFluxo.id, alvoCfg), eq(tFluxo.nome, alvoCfg)),
+      ),
+    )
     .limit(1)
   if (!alvo?.versaoPublicadaId) return false
 

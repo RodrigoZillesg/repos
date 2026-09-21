@@ -30,7 +30,12 @@
   --color-ia: oklch(58% 0.16 310);
   --color-hook: oklch(58% 0.1 200);
   --color-ok: oklch(58% 0.14 150);
+  /* Aviso: algo a conferir, que não impede seguir. */
   --color-alerta: oklch(60% 0.19 28);
+  /* Erro: bloqueia. Mais escuro e mais saturado que o aviso, para os dois não
+     se confundirem — mas a cor nunca é o único sinal: erro e aviso vêm sempre
+     com ícone e com o texto do problema ao lado. */
+  --color-perigo: oklch(50% 0.23 22);
 
   --radius-cartao: 0.75rem;
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -46,6 +51,7 @@
     --color-tinta-3: oklch(60% 0.008 265);
     --color-acento: oklch(70% 0.15 274);
     --color-acento-suave: oklch(28% 0.04 274);
+    --color-perigo: oklch(68% 0.20 22);
     /* O escuro tem os próprios passos das mesmas matizes, validados contra o
        fundo escuro — não é o claro invertido. */
     --color-canal-ligacao: oklch(60% 0.17 45);
@@ -64,6 +70,7 @@
   --color-tinta-3: oklch(60% 0.008 265);
   --color-acento: oklch(70% 0.15 274);
   --color-acento-suave: oklch(28% 0.04 274);
+  --color-perigo: oklch(68% 0.20 22);
     --color-canal-ligacao: oklch(60% 0.17 45);
     --color-canal-whatsapp: oklch(62% 0.15 154);
     --color-canal-sms: oklch(64% 0.21 340);

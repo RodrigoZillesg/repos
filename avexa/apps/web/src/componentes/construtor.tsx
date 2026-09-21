@@ -1,11 +1,14 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { Plus, X } from 'lucide-react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { Plus, Redo2, TriangleAlert, Undo2, X } from 'lucide-react'
 import {
   ETAPAS,
   GRUPOS,
   cfgPadrao,
+  validarGrafo,
+  type Achado,
+  type Canal,
   type Etapa,
   type Grafo,
   type LimitesMotor,
@@ -33,7 +36,11 @@ interface Props {
   fuso: string
   templatesAprovados: Record<string, string[]>
   t: Record<Chave, string>
-  aoSalvar: (fluxoId: string, grafo: Grafo, publicar: boolean) => Promise<{ ok: boolean; erro?: string }>
+  aoSalvar: (
+    fluxoId: string,
+    grafo: Grafo,
+    publicar: boolean,
+  ) => Promise<{ ok: boolean; erro?: string; achados?: Achado[] }>
 }
 
 const novoId = () => Math.random().toString(36).slice(2, 10)
@@ -77,14 +84,79 @@ export function Construtor(p: Props) {
   const [aviso, setAviso] = useState<string | null>(null)
   const [simulando, setSimulando] = useState(false)
   const [pendente, iniciar] = useTransition()
+  // Pilhas de desfazer/refazer. `mutar` já clonava o grafo inteiro a cada
+  // alteração, então guardar o anterior custa o que já estava sendo pago.
+  const [desfazer, setDesfazer] = useState<Grafo[]>([])
+  const [refazer, setRefazer] = useState<Grafo[]>([])
+  /** Achados da última publicação, que carregam `etapaId` do servidor. */
+  const [doServidor, setDoServidor] = useState<Achado[]>([])
 
   const selecionada = useMemo(() => (sel ? achar(grafo, sel) : null), [grafo, sel])
+
+  /** Validação enquanto se edita, não só ao publicar.
+   *
+   *  As mesmas regras que o servidor aplica — `validarGrafo` vem de core e roda
+   *  nos dois lados. Aqui ela serve para marcar o nó; lá ela decide se publica.
+   *  O servidor continua sendo quem manda: esconder botão não é controle. */
+  const achados = useMemo(
+    () =>
+      validarGrafo(grafo, {
+        canaisAtivos: p.canais,
+        templatesAprovados: p.templatesAprovados as Partial<Record<Canal, string[]>>,
+        fluxosDoCliente: p.fluxos.filter((f) => f.id !== p.fluxoId),
+      }),
+    [grafo, p.canais, p.templatesAprovados, p.fluxos, p.fluxoId],
+  )
+
+  /** Achados por etapa, para o cartão saber o que mostrar sem varrer a lista. */
+  const porEtapa = useMemo(() => {
+    const m = new Map<string, Achado[]>()
+    for (const a of [...achados, ...doServidor]) {
+      if (a.etapaId) m.set(a.etapaId, [...(m.get(a.etapaId) ?? []), a])
+    }
+    return m
+  }, [achados, doServidor])
+
+  /** Achados sem etapa: valem para o fluxo inteiro. */
+  const doFluxo = useMemo(() => achados.filter((a) => !a.etapaId), [achados])
+
+  const todos = useMemo(() => [...achados, ...doServidor], [achados, doServidor])
+  const quantosErros = todos.filter((a) => a.gravidade === 'erro').length
+  const quantosAvisos = todos.length - quantosErros
 
   function mutar(f: (g: Grafo) => void) {
     const g = clonar(grafo)
     f(g)
+    setDesfazer((d) => [...d.slice(-49), grafo])
+    setRefazer([])
     setGrafo(g)
     setSujo(true)
+    // O resultado da última publicação deixa de valer assim que o grafo muda:
+    // manter aquele erro na tela apontaria para uma etapa que talvez nem exista
+    // mais.
+    setDoServidor([])
+  }
+
+  function voltarUmPasso() {
+    setDesfazer((d) => {
+      const anterior = d[d.length - 1]
+      if (!anterior) return d
+      setRefazer((r) => [...r, grafo])
+      setGrafo(anterior)
+      setSujo(true)
+      return d.slice(0, -1)
+    })
+  }
+
+  function refazerUmPasso() {
+    setRefazer((r) => {
+      const proximo = r[r.length - 1]
+      if (!proximo) return r
+      setDesfazer((d) => [...d, grafo])
+      setGrafo(proximo)
+      setSujo(true)
+      return r.slice(0, -1)
+    })
   }
 
   function inserir(tipo: TipoEtapa, alvoId?: string) {
@@ -101,10 +173,32 @@ export function Construtor(p: Props) {
     setSel(nova.id)
   }
 
+  /** Ctrl+Z / Ctrl+Shift+Z.
+   *
+   *  Ignora quando o foco está num campo de texto: dentro do inspetor, Ctrl+Z
+   *  tem que desfazer a digitação, não a última alteração do fluxo. */
+  useEffect(() => {
+    if (!p.podeEditar) return
+    const naTela = (ev: KeyboardEvent) => {
+      const alvo = ev.target as HTMLElement | null
+      if (alvo && /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName)) return
+      if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'z') return
+      ev.preventDefault()
+      if (ev.shiftKey) refazerUmPasso()
+      else voltarUmPasso()
+    }
+    window.addEventListener('keydown', naTela)
+    return () => window.removeEventListener('keydown', naTela)
+  })
+
   function salvar(publicar: boolean) {
     iniciar(async () => {
       const r = await p.aoSalvar(p.fluxoId, grafo, publicar)
       setAviso(r.ok ? null : (r.erro ?? 'falhou'))
+      // Os achados do servidor vêm com `etapaId` e marcam o nó. É a diferença
+      // entre "o template X não está aprovado" e saber em QUAL das três etapas
+      // de WhatsApp o problema está.
+      setDoServidor(r.achados ?? [])
       if (r.ok) setSujo(false)
     })
   }
@@ -142,7 +236,37 @@ export function Construtor(p: Props) {
         <div className="flex items-center gap-2 border-b px-4 py-2.5">
           {sujo && <Selo tom="alerta">alterações não salvas</Selo>}
           {aviso && <Selo tom="alerta">{aviso}</Selo>}
+          {/* Contagem viva, não só ao publicar. Um fluxo com erro dizia-se
+              pronto até alguém tentar publicar. */}
+          {quantosErros > 0 && <Selo tom="perigo">{quantosErros} com erro</Selo>}
+          {quantosErros === 0 && quantosAvisos > 0 && (
+            <Selo tom="alerta">{quantosAvisos} com aviso</Selo>
+          )}
           <div className="ml-auto flex gap-2">
+            {p.podeEditar && (
+              <>
+                <Botao
+                  variante="contorno"
+                  tamanho="pequeno"
+                  disabled={desfazer.length === 0}
+                  onClick={voltarUmPasso}
+                  title="Desfazer (Ctrl+Z)"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  <span className="sr-only">Desfazer</span>
+                </Botao>
+                <Botao
+                  variante="contorno"
+                  tamanho="pequeno"
+                  disabled={refazer.length === 0}
+                  onClick={refazerUmPasso}
+                  title="Refazer (Ctrl+Shift+Z)"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                  <span className="sr-only">Refazer</span>
+                </Botao>
+              </>
+            )}
             {/* Simula o grafo que está na tela, inclusive o que ainda não foi
                 salvo: conferir depois de publicar seria conferir com lead real. */}
             <Botao variante="contorno" tamanho="pequeno" onClick={() => setSimulando(true)}>
@@ -172,6 +296,7 @@ export function Construtor(p: Props) {
             sel={sel}
             canais={p.canais}
             podeEditar={p.podeEditar}
+            porEtapa={porEtapa}
             aoSelecionar={setSel}
             aoInserirAntes={inserir}
           />
@@ -179,6 +304,27 @@ export function Construtor(p: Props) {
             <div className="mt-2 flex justify-center">
               <MenuInserir canais={p.canais} aoEscolher={(tipo) => inserir(tipo)} />
             </div>
+          )}
+
+          {/* Os problemas do fluxo inteiro, que não pertencem a etapa nenhuma —
+              "nenhuma etapa de canal", por exemplo. Os de etapa aparecem no
+              próprio cartão; repeti-los aqui seria pedir para o operador ler a
+              mesma coisa duas vezes. */}
+          {doFluxo.length > 0 && (
+            <ul className="mt-5 space-y-1.5">
+              {doFluxo.map((a, i) => (
+                <li
+                  key={i}
+                  className="flex items-start gap-2 text-xs leading-snug"
+                  style={{
+                    color: a.gravidade === 'erro' ? 'var(--color-perigo)' : 'var(--color-alerta)',
+                  }}
+                >
+                  <TriangleAlert aria-hidden size={13} className="mt-0.5 shrink-0" />
+                  {a.mensagem}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>
@@ -227,7 +373,7 @@ export function Construtor(p: Props) {
           grafo={grafo}
           canais={p.canais}
           templatesAprovados={p.templatesAprovados}
-          fluxosDoCliente={p.fluxos.filter((f) => f.id !== p.fluxoId).map((f) => f.nome)}
+          fluxosDoCliente={p.fluxos.filter((f) => f.id !== p.fluxoId)}
           limites={p.limites}
           fuso={p.fuso}
           t={p.t}
@@ -243,6 +389,7 @@ function Pilha({
   sel,
   canais,
   podeEditar,
+  porEtapa,
   aoSelecionar,
   aoInserirAntes,
   nivel = 0,
@@ -251,6 +398,8 @@ function Pilha({
   sel: string | null
   canais: Record<string, boolean>
   podeEditar: boolean
+  /** Problemas de cada etapa, para marcar o cartão. */
+  porEtapa: Map<string, Achado[]>
   aoSelecionar: (id: string) => void
   aoInserirAntes: (tipo: TipoEtapa, alvoId: string) => void
   nivel?: number
@@ -260,6 +409,8 @@ function Pilha({
       {lista.map((e) => {
         const def = ETAPAS[e.tipo]
         const desligado = def.canal && !canais[def.canal]
+        const problemas = porEtapa.get(e.id) ?? []
+        const temErroAqui = problemas.some((a) => a.gravidade === 'erro')
         return (
           <li key={e.id}>
             {podeEditar && (
@@ -276,7 +427,11 @@ function Pilha({
                 'flex w-full items-center gap-3 rounded-[var(--radius-cartao)] border bg-[var(--color-superficie)] px-3 py-2.5 text-left transition-colors',
                 sel === e.id
                   ? 'border-[var(--color-acento)] ring-1 ring-[var(--color-acento)]'
-                  : 'hover:border-[var(--color-tinta-3)]',
+                  : temErroAqui
+                    ? 'border-[var(--color-perigo)]'
+                    : problemas.length > 0
+                      ? 'border-[var(--color-alerta)]'
+                      : 'hover:border-[var(--color-tinta-3)]',
               )}
             >
               <span
@@ -289,7 +444,27 @@ function Pilha({
                 <span className="block truncate text-xs text-[var(--color-tinta-3)]">
                   {def.resumo(e.cfg)}
                 </span>
+                {/* O problema escrito no próprio cartão. Antes ele existia só
+                    numa lista à parte, e descobrir a qual das três etapas de
+                    WhatsApp ele se referia era com o operador. */}
+                {problemas.length > 0 && (
+                  <span
+                    className="mt-1 block text-xs leading-snug"
+                    style={{ color: temErroAqui ? 'var(--color-perigo)' : 'var(--color-alerta)' }}
+                  >
+                    {problemas[0]!.mensagem}
+                    {problemas.length > 1 && ` (+${problemas.length - 1})`}
+                  </span>
+                )}
               </span>
+              {problemas.length > 0 && (
+                <TriangleAlert
+                  aria-hidden
+                  size={14}
+                  className="shrink-0"
+                  style={{ color: temErroAqui ? 'var(--color-perigo)' : 'var(--color-alerta)' }}
+                />
+              )}
               {desligado && <Selo tom="alerta">off</Selo>}
             </button>
 
@@ -304,6 +479,7 @@ function Pilha({
                     sel={sel}
                     canais={canais}
                     podeEditar={podeEditar}
+                    porEtapa={porEtapa}
                     aoSelecionar={aoSelecionar}
                     aoInserirAntes={aoInserirAntes}
                     nivel={nivel + 1}
@@ -496,9 +672,20 @@ function Inspetor({
                 onChange={(e) => aoMudar(campo.k, e.target.value)}
               >
                 <option value="">—</option>
+                {/* `value` explícito: sem ele o valor da opção vira o TEXTO, e
+                    a etapa passa a referenciar o fluxo pelo nome. Renomear o
+                    fluxo quebrava a chamada em silêncio, em execução. */}
                 {fluxos.map((f) => (
-                  <option key={f.id}>{f.nome}</option>
+                  <option key={f.id} value={f.id}>
+                    {f.nome}
+                  </option>
                 ))}
+                {/* Referência antiga, gravada por nome. Fica visível para poder
+                    ser reescolhida, em vez de o campo voltar sozinho para "—" e
+                    trocar o destino sem ninguém ver. */}
+                {valor && !fluxos.some((f) => f.id === valor) && (
+                  <option value={valor}>{valor} (referência antiga, reescolha)</option>
+                )}
               </Selecao>
             )}
 

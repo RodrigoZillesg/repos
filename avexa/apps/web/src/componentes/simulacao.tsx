@@ -23,7 +23,7 @@ interface Props {
   grafo: Grafo
   canais: Record<string, boolean>
   templatesAprovados: Record<string, string[]>
-  fluxosDoCliente: string[]
+  fluxosDoCliente: Array<{ id: string; nome: string }>
   limites: LimitesMotor
   fuso: string
   t: Record<Chave, string>

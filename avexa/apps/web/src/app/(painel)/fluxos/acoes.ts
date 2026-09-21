@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, desc, eq } from 'drizzle-orm'
 import { cliente, db, fluxo, fluxoVersao, template } from '@avexa/db'
-import { temErro, validarGrafo, type Grafo } from '@avexa/core'
+import { temErro, validarGrafo, type Achado, type Grafo } from '@avexa/core'
 import { sessaoAtual } from '@/lib/auth'
 import { canaisDoCliente, listarFluxos } from '@/lib/dados'
 
@@ -12,11 +12,25 @@ import { canaisDoCliente, listarFluxos } from '@/lib/dados'
  *  Publicar cria uma versão nova em vez de sobrescrever: um lead parado numa
  *  espera de três dias precisa terminar o fluxo em que entrou, não o que foi
  *  editado no meio do caminho. */
+export interface ResultadoSalvar {
+  ok: boolean
+  /** Uma linha para o topo da tela. Os detalhes vão em `achados`. */
+  erro?: string
+  /** Todos os achados da validação, com `etapaId` — é o que permite marcar o
+   *  nó que tem o problema em vez de descrever o problema por escrito.
+   *
+   *  Antes daqui só saía a primeira mensagem de erro, como texto solto: o
+   *  operador corrigia, publicava, recebia o próximo. Um por vez, sem saber
+   *  quantos faltavam nem em qual etapa. */
+  achados?: Achado[]
+}
+
 export async function salvarFluxo(
   fluxoId: string,
   grafo: Grafo,
   publicar: boolean,
-): Promise<{ ok: boolean; erro?: string }> {
+): Promise<ResultadoSalvar> {
+  let avisos: Achado[] = []
   const s = await sessaoAtual()
   // A permissão é conferida aqui, no servidor. Botão escondido não é controle
   // de acesso: uma server action é um endpoint público.
@@ -39,7 +53,9 @@ export async function salvarFluxo(
     const porCanal: Record<string, string[]> = {}
     for (const a of aprovados) (porCanal[a.canal] ??= []).push(a.nome)
 
-    const outros = (await listarFluxos(c.id)).filter((x) => x.id !== fluxoId).map((x) => x.nome)
+    const outros = (await listarFluxos(c.id))
+      .filter((x) => x.id !== fluxoId)
+      .map((x) => ({ id: x.id, nome: x.nome }))
     const achados = validarGrafo(grafo, {
       canaisAtivos: canais,
       templatesAprovados: porCanal,
@@ -47,9 +63,20 @@ export async function salvarFluxo(
     })
 
     if (temErro(achados)) {
-      const primeiro = achados.find((a) => a.gravidade === 'erro')!
-      return { ok: false, erro: primeiro.mensagem }
+      const quantos = achados.filter((a) => a.gravidade === 'erro').length
+      return {
+        ok: false,
+        erro:
+          quantos === 1
+            ? 'Um problema impede publicar.'
+            : `${quantos} problemas impedem publicar.`,
+        achados,
+      }
     }
+    // Sem erro os avisos sobem junto — canal não contratado, subfluxo por nome
+    // — mas guardados para DEPOIS de publicar. Retornar aqui pularia a gravação
+    // e reportaria sucesso sem ter salvo nada.
+    avisos = achados
   }
 
   const [ultima] = await d
@@ -78,7 +105,7 @@ export async function salvarFluxo(
   }
 
   revalidatePath('/fluxos')
-  return { ok: true }
+  return { ok: true, ...(avisos.length > 0 ? { achados: avisos } : {}) }
 }
 
 export async function criarFluxo(clienteId: string, nome: string): Promise<{ ok: boolean; id?: string }> {

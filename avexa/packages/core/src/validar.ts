@@ -20,8 +20,29 @@ export interface ContextoValidacao {
   canaisAtivos: Record<string, boolean>
   /** Nomes de template aprovados, por canal. */
   templatesAprovados: Partial<Record<Canal, string[]>>
-  /** Nomes de fluxo que existem neste cliente. */
-  fluxosDoCliente: string[]
+  /** Fluxos que existem neste cliente, por id e nome.
+   *
+   *  Os dois, e não só o nome, porque `subfluxo.cfg.alvo` guardou nome durante
+   *  um tempo: o select do construtor não tinha `value`, então o valor da opção
+   *  era o texto. Fluxos publicados com esse formato continuam no banco. */
+  fluxosDoCliente: FluxoConhecido[]
+}
+
+export interface FluxoConhecido {
+  id: string
+  nome: string
+}
+
+/** Resolve o alvo de um subfluxo aceitando id ou nome.
+ *
+ *  Nome é o formato antigo e é frágil — renomear o fluxo quebrava a chamada em
+ *  silêncio, em execução, sem erro nenhum. Continuamos lendo nome para não
+ *  invalidar o que já está publicado, mas o construtor só grava id. */
+export function acharFluxoAlvo(
+  alvo: string,
+  fluxos: readonly FluxoConhecido[],
+): FluxoConhecido | null {
+  return fluxos.find((f) => f.id === alvo) ?? fluxos.find((f) => f.nome === alvo) ?? null
 }
 
 function percorrer(lista: Etapa[], visitar: (e: Etapa) => void): void {
@@ -88,8 +109,19 @@ export function validarGrafo(grafo: Grafo, ctx: ContextoValidacao): Achado[] {
     if (e.tipo === 'subfluxo') {
       const alvo = e.cfg.alvo
       if (!alvo) erro('Executar outro fluxo: nenhum fluxo escolhido.', e.id)
-      else if (!ctx.fluxosDoCliente.includes(alvo)) {
-        erro(`Executar outro fluxo: "${alvo}" não existe neste cliente.`, e.id)
+      else {
+        const achado = acharFluxoAlvo(alvo, ctx.fluxosDoCliente)
+        if (!achado) erro(`Executar outro fluxo: "${alvo}" não existe neste cliente.`, e.id)
+        // Referência por nome ainda funciona, mas é uma bomba-relógio: quem
+        // renomear o fluxo quebra esta chamada sem receber erro nenhum, porque
+        // a validação só roda ao publicar e este fluxo talvez nunca seja
+        // publicado de novo.
+        else if (achado.id !== alvo) {
+          aviso(
+            `Executar outro fluxo: "${alvo}" está referenciado pelo nome. Reescolha o fluxo no campo para gravar a referência fixa — renomeá-lo hoje quebraria esta etapa em silêncio.`,
+            e.id,
+          )
+        }
       }
     }
 

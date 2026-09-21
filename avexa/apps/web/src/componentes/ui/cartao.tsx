@@ -17,11 +17,13 @@ export function Selo({
   tom = 'neutro',
   className,
   ...props
-}: React.ComponentProps<'span'> & { tom?: 'neutro' | 'ok' | 'alerta' | 'acento' }) {
+}: React.ComponentProps<'span'> & { tom?: 'neutro' | 'ok' | 'alerta' | 'perigo' | 'acento' }) {
   const tons = {
     neutro: 'border-[var(--color-borda)] text-[var(--color-tinta-3)]',
     ok: 'border-[var(--color-ok)] text-[var(--color-ok)]',
     alerta: 'border-[var(--color-alerta)] text-[var(--color-alerta)]',
+    /** Bloqueia. Distinto do aviso, e nunca sozinho: vem com texto. */
+    perigo: 'border-[var(--color-perigo)] text-[var(--color-perigo)]',
     acento: 'border-[var(--color-acento)] text-[var(--color-acento)]',
   }
   return (

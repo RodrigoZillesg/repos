@@ -9,7 +9,7 @@ const e = (id: string, tipo: Etapa['tipo'], cfg: Record<string, string> = {}, ex
 const ctx: ContextoValidacao = {
   canaisAtivos: { ligacao: true, whatsapp: true, sms: true, email: true },
   templatesAprovados: { whatsapp: ['Primeiro contato'], email: ['Retomada'], sms: ['Lembrete'] },
-  fluxosDoCliente: ['Recuperação por telefone'],
+  fluxosDoCliente: [{ id: 'flx-1', nome: 'Recuperação por telefone' }],
 }
 
 const valido: Grafo = [
@@ -54,6 +54,27 @@ test('canal não contratado é aviso, não erro', () => {
 test('subfluxo apontando para fluxo inexistente é erro', () => {
   const g = [e('1', 'entrada', {}), e('2', 'subfluxo', { alvo: 'Fluxo fantasma' })]
   assert.equal(temErro(validarGrafo(g, ctx)), true)
+})
+
+/** Só os achados presos a esta etapa: o grafo mínimo destes testes dispara
+ *  avisos de outra natureza (fluxo sem canal, por exemplo). */
+const doSubfluxo = (g: Grafo) => validarGrafo(g, ctx).filter((a) => a.etapaId === '2')
+
+test('subfluxo por id não reclama', () => {
+  const g = [e('1', 'entrada', {}), e('2', 'subfluxo', { alvo: 'flx-1' })]
+  assert.deepEqual(doSubfluxo(g), [])
+})
+
+test('subfluxo por NOME ainda funciona, mas avisa que é bomba-relógio', () => {
+  // Formato antigo: o select do construtor não tinha `value`, então gravava o
+  // texto. Continua sendo aceito para não invalidar fluxo já publicado — mas
+  // renomear o fluxo quebraria a chamada em execução, sem erro nenhum.
+  const g = [e('1', 'entrada', {}), e('2', 'subfluxo', { alvo: 'Recuperação por telefone' })]
+  const achados = doSubfluxo(g)
+  assert.equal(temErro(achados), false)
+  assert.equal(achados.length, 1)
+  assert.equal(achados[0]!.gravidade, 'aviso')
+  assert.match(achados[0]!.mensagem, /pelo nome/)
 })
 
 test('webhook de saída sem URL válida é erro', () => {
