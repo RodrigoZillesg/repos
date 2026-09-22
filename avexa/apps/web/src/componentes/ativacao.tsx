@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { Check, Copy, Minus, TriangleAlert } from 'lucide-react'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
 import { Cartao, Ponto, Selo } from '@/componentes/ui/cartao'
 import { CORES } from '@/lib/utils'
+import { capacidadesExigidas, escolher, servem } from '@/lib/escolha-de-numero'
 import type { Chave } from '@/i18n/dicionario'
 import type { FormAtivacao } from '@/app/(painel)/ativar/acoes'
 import type { ResultadoAtivacao } from '@avexa/servicos'
@@ -63,21 +64,29 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres, paises }: Pro
   // Nem todo número serve para todo canal: na Austrália um Local em geral não
   // manda SMS, quem manda é o Mobile. Um Local atribuído a quem contratou SMS
   // deixaria o canal ligado e a mensagem morrendo num 400 do Twilio.
-  const precisa = [
-    ...(form.canais.ligacao ? ['voz'] : []),
-    ...(form.canais.sms ? ['sms'] : []),
-  ]
-  const serve = (capacidades: string[]) => precisa.every((c) => capacidades.includes(c))
-  const uteis = numerosLivres.filter((n) => serve(n.capacidades))
+  const precisa = useMemo(() => capacidadesExigidas(form.canais), [form.canais])
+
+  // `useMemo` porque este array é dependência do efeito abaixo. Recalculado a
+  // cada render, ele seria um objeto novo toda vez, e o efeito rodaria sempre.
+  const uteis = useMemo(() => servem(numerosLivres, precisa), [numerosLivres, precisa])
 
   // Marcar SMS depois de já ter escolhido um número que só faz voz deixaria a
   // escolha presa num número que a lista nem mostra mais. Quando o escolhido
   // sai da lista, cai no primeiro que serve.
+  //
+  // O `return f` não é detalhe: o React só interrompe o ciclo quando o
+  // atualizador devolve o MESMO objeto. Devolvendo `{ ...f }` com o valor já
+  // igual, o estado muda de identidade, o componente renderiza, o efeito roda
+  // de novo — e a página trava num laço de render. Foi o que aconteceu: com a
+  // lista vazia e o campo já vazio, `{ ...f, numeroE164: '' }` era um objeto
+  // novo a cada volta, e o menu inteiro parava de responder.
   useEffect(() => {
     if (form.numeroModo !== 'existente') return
-    if (uteis.some((n) => n.e164 === form.numeroE164)) return
-    setForm((f) => ({ ...f, numeroE164: uteis[0]?.e164 ?? '' }))
-  }, [form.numeroModo, form.numeroE164, uteis])
+    setForm((f) => {
+      const alvo = escolher(f.numeroE164, uteis)
+      return alvo === f.numeroE164 ? f : { ...f, numeroE164: alvo }
+    })
+  }, [form.numeroModo, uteis])
 
   function enviar() {
     iniciar(async () => setResultado(await aoAtivar(form)))
