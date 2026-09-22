@@ -368,6 +368,50 @@ export interface ImportacaoDeNumero {
  *
  *  Comprar no Twilio não basta para voz: a Vapi identifica número por id
  *  próprio, e é esse id que o motor usa para ligar. São dois passos. */
+/** Procura um número já importado na conta da Vapi, pelo E.164. */
+export async function acharNumeroNaVapi(
+  cred: CredenciaisVapi,
+  e164: string,
+): Promise<{ ok: true; id: string | null } | { ok: false; erro: string }> {
+  const r = await requisitar(urlVapi('/phone-number'), {
+    metodo: 'GET',
+    cabecalhos: autorizacaoVapi(cred),
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  if (!r.ok) return { ok: false, erro: r.erro ?? 'falha ao listar os números da Vapi' }
+
+  const lista = Array.isArray(r.corpo) ? r.corpo : []
+  const achado = lista.find((x) => (x as { number?: string }).number === e164)
+  return { ok: true, id: (achado as { id?: string } | undefined)?.id ?? null }
+}
+
+/** Importa o número na Vapi, ou reaproveita o que já está lá.
+ *
+ *  Procurar antes não é otimização: a Vapi recusa importar um número que já
+ *  está na conta, e o segundo ciclo de teste com o mesmo número falharia no
+ *  mesmo passo em que o primeiro passou. Como número custa um mês inteiro a
+ *  cada compra, testar de verdade significa reusar o mesmo número muitas
+ *  vezes — e isso só funciona se importar for idempotente. */
+export async function garantirNumeroNaVapi(
+  cred: CredenciaisVapi,
+  i: ImportacaoDeNumero,
+): Promise<ResultadoAssistente> {
+  const existente = await acharNumeroNaVapi(cred, i.e164)
+  if (!existente.ok) return { ok: false, erro: existente.erro }
+
+  if (existente.id) {
+    // Já está lá: só reaponta para o assistente desta ativação. Sem isto, o
+    // número continuaria atendendo com o agente do cliente anterior.
+    if (i.assistantId) {
+      const v = await vincularAssistenteAoNumero(cred, existente.id, i.assistantId)
+      if (!v.ok) return { ok: false, erro: v.erro ?? 'falha ao reapontar o assistente' }
+    }
+    return { ok: true, id: existente.id }
+  }
+
+  return importarNumeroNaVapi(cred, i)
+}
+
 export async function importarNumeroNaVapi(
   cred: CredenciaisVapi,
   i: ImportacaoDeNumero,

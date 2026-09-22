@@ -4,7 +4,7 @@ import { agenteVoz, cliente, configGlobal, numero, projeto, projetoCanal, type D
 import {
   atualizarAssistente,
   criarAssistente,
-  importarNumeroNaVapi,
+  garantirNumeroNaVapi,
   segredoDoWebhookVapi,
   vincularAssistenteAoNumero,
   type AssistenteVapi,
@@ -322,7 +322,7 @@ export async function importarNumeroDoProjeto(
     .where(eq(projeto.id, projetoId))
     .limit(1)
 
-  const r = await importarNumeroNaVapi(vapi, {
+  const r = await garantirNumeroNaVapi(vapi, {
     e164: linha.e164,
     twilioAccountSid: twilio.accountSid,
     twilioAuthToken: twilio.authToken,

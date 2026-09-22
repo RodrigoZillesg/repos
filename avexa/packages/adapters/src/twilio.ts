@@ -432,3 +432,24 @@ export async function listarPaisesDisponiveis(
 
   return { ok: true, paises }
 }
+
+/** Devolve o número ao Twilio. Irreversível na prática.
+ *
+ *  O Twilio cobra o mês inteiro no ato da compra e NÃO faz proporcional: soltar
+ *  no mesmo dia não devolve nada. Dá para reclamar o número no console por dez
+ *  dias, mas o ciclo de cobrança recomeça — ou seja, paga-se de novo.
+ *
+ *  Por isso isto é uma função separada e explícita, e não um detalhe de alguma
+ *  limpeza: quem chama precisa ter decidido gastar. */
+export async function liberarNumero(
+  cred: CredenciaisTwilio,
+  sid: string,
+): Promise<{ ok: boolean; erro?: string }> {
+  const r = await requisitar(`${base(cred)}/IncomingPhoneNumbers/${sid}.json`, {
+    metodo: 'DELETE',
+    cabecalhos: autorizacao(cred),
+    ...(cred.buscar ? { buscar: cred.buscar } : {}),
+  })
+  // O Twilio responde 204 sem corpo; `requisitar` já trata isso como ok.
+  return r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'falha ao liberar o número' }
+}

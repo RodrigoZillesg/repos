@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, prontidao, cliente, remover-cliente, remover-cliente-confirmado, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, prontidao, cliente, remover-cliente, remover-cliente-confirmado, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, liberar-numero, liberar-numero-confirmado, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -23,7 +23,7 @@ on:
         type: string
         default: worker
       email:
-        description: 'E-mail alvo (acesso, testar-email, trocar-email: o NOVO)'
+        description: 'E-mail alvo (acesso, testar-email, trocar-email: o NOVO). Em "liberar-numero": o número em E.164'
         type: string
         default: rodrigo.zillesg@platty.tech
       email_atual:
@@ -450,6 +450,23 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker numeros procurar '${{ inputs.pais }}'"
+
+      # Mostra o que a liberação faria. Não solta nada.
+      - name: Liberar número (simulação)
+        if: inputs.acao == 'liberar-numero'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker liberar '${{ inputs.email }}'"
+
+      # SOLTA O NÚMERO NO TWILIO, de verdade. O mês já pago não volta, e
+      # recuperá-lo depois é comprar de novo.
+      - name: Liberar número (confirmado)
+        if: inputs.acao == 'liberar-numero-confirmado'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker liberar '${{ inputs.email }}' --liberar"
 
       # COMPRA DE VERDADE: o número passa a custar todo mês.
       - name: Comprar um número

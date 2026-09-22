@@ -27,7 +27,8 @@
     "prontidao": "tsx scripts/prontidao.ts",
     "e2e:numeros": "tsx scripts/e2e-numeros.ts",
     "diagnostico": "tsx scripts/diagnostico-cliente.ts",
-    "remover": "tsx scripts/remover-cliente.ts"
+    "remover": "tsx scripts/remover-cliente.ts",
+    "liberar": "tsx scripts/liberar-numero.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",
