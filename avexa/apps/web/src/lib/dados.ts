@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, asc, desc, eq, gt, gte, inArray, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, or } from 'drizzle-orm'
 import {
   cliente,
   db,
@@ -65,7 +65,10 @@ export async function numerosLivres(s: Sessao): Promise<NumeroLivre[]> {
   const livres = await db()
     .select({ e164: numero.e164, capacidades: numero.capacidades })
     .from(numero)
-    .where(eq(numero.status, 'livre'))
+    // `provedorSid` nulo é um número que não existe na conta do Twilio: uma
+    // linha nossa e nada mais. Oferecê-lo é oferecer uma escolha que vira erro
+    // na importação para a Vapi, três passos depois.
+    .where(and(eq(numero.status, 'livre'), isNotNull(numero.provedorSid)))
     .orderBy(numero.e164)
   if (livres.length === 0) return []
 

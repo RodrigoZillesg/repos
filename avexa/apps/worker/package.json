@@ -25,7 +25,9 @@
     "publicar-agentes": "tsx scripts/publicar-agentes.ts",
     "e2e:paginacao": "tsx scripts/e2e-paginacao.ts",
     "prontidao": "tsx scripts/prontidao.ts",
-    "e2e:numeros": "tsx scripts/e2e-numeros.ts"
+    "e2e:numeros": "tsx scripts/e2e-numeros.ts",
+    "diagnostico": "tsx scripts/diagnostico-cliente.ts",
+    "remover": "tsx scripts/remover-cliente.ts"
   },
   "dependencies": {
     "@avexa/adapters": "workspace:*",

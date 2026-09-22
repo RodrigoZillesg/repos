@@ -328,14 +328,21 @@ export async function ativarCliente(
   } else {
     const todosLivres = await db.select().from(numero).where(eq(numero.status, 'livre'))
 
-    // Só serve o número que faz o que os canais contratados precisam. Um Local
-    // australiano não manda SMS: atribuí-lo a quem contratou SMS deixaria o
-    // canal ligado e a mensagem morrendo num 400 do Twilio.
+    // Primeiro: o número tem que EXISTIR no Twilio. Sem `provedorSid` ele é uma
+    // linha na nossa tabela e nada mais — foi o que aconteceu com o Platty, que
+    // recebeu um número do seed e viu a Vapi recusar a importação, porque a
+    // conta do Twilio não tem esse número para importar. A prontidão já
+    // apontava isso depois do fato; aqui o número nem chega a ser entregue.
+    const reais = todosLivres.filter((n) => Boolean(n.provedorSid))
+
+    // Depois: o número tem que fazer o que os canais contratados precisam. Um
+    // Local australiano não manda SMS, e atribuí-lo a quem contratou SMS
+    // deixaria o canal ligado e a mensagem morrendo num 400 do Twilio.
     const precisa = [
       ...(entrada.canais.ligacao ? ['voz'] : []),
       ...(entrada.canais.sms ? ['sms'] : []),
     ]
-    const livres = todosLivres.filter((n) => precisa.every((c) => n.capacidades.includes(c)))
+    const livres = reais.filter((n) => precisa.every((c) => n.capacidades.includes(c)))
 
     // Prefere um número do país do cliente: ligar para um lead americano de um
     // número australiano derruba a taxa de atendimento. Só cai em outro país se
@@ -360,22 +367,23 @@ export async function ativarCliente(
     } else {
       // Pool vazio não invalida a ativação: o resto funciona e alguém repõe.
       //
-      // Distingue "não há número" de "há, mas nenhum serve": as duas situações
-      // se resolvem de formas diferentes, e dizer só "pool vazio" mandaria
-      // alguém procurar um número que está ali na frente e não presta.
-      const faltaCapacidade = todosLivres.length > 0
-      marcar(
-        3,
-        'Número do cliente',
-        'falhou',
-        faltaCapacidade
-          ? `${todosLivres.length} número(s) livre(s), nenhum com ${precisa.join(' + ')}`
-          : 'nenhum número livre no pool',
-      )
+      // Três situações diferentes, três saídas diferentes. Dizer só "pool
+      // vazio" nas três mandaria alguém procurar um número que está ali na
+      // frente e não presta — ou comprar um quando o problema era outro.
+      const motivo =
+        todosLivres.length === 0
+          ? 'nenhum número livre no pool'
+          : reais.length === 0
+            ? `${todosLivres.length} número(s) livre(s), nenhum comprado de verdade no Twilio`
+            : `${reais.length} número(s) livre(s) no Twilio, nenhum com ${precisa.join(' + ')}`
+
+      marcar(3, 'Número do cliente', 'falhou', motivo)
       avisos.push(
-        faltaCapacidade
-          ? `Há número livre no pool, mas nenhum com ${precisa.join(' e ')}. Um número Local em geral não manda SMS; compre um Mobile.`
-          : 'Nenhum número livre no pool: ligação e SMS não saem até alguém repor ou comprar.',
+        todosLivres.length === 0
+          ? 'Nenhum número livre no pool: ligação e SMS não saem até alguém repor ou comprar.'
+          : reais.length === 0
+            ? 'Os números livres do pool não existem na conta do Twilio: são de teste. Compre um número de verdade.'
+            : `Há número livre e real no pool, mas nenhum com ${precisa.join(' e ')}. Um número Local em geral não manda SMS; compre um Mobile.`,
       )
     }
   }

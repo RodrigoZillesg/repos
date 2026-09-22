@@ -11,7 +11,7 @@ on:
       acao:
         description: 'O que fazer no servidor'
         type: choice
-        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, prontidao, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
+        options: [diagnostico, bootstrap, logs, estado, nginx, publicar, certificado, publicar-tls, renovacao-automatica, renovar, backup-automatico, backup, segredos, fornecedores, prontidao, cliente, remover-cliente, remover-cliente-confirmado, testar-email, testar-ia, vapi, publicar-agentes, numeros, comprar-numero, equipe, trocar-email, remover-usuario, acesso, limpar-verificacao]
         default: diagnostico
       usuario:
         description: 'Entrar como (root só para o bootstrap inicial)'
@@ -468,6 +468,33 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
             "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
              run --rm worker pnpm --filter @avexa/worker vapi '${{ inputs.id }}'"
+
+      # Tudo que a ativação deixou de pé num cliente, com o motivo do que
+      # falhou. Só lê.
+      - name: Diagnóstico de um cliente
+        if: inputs.acao == 'cliente'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker diagnostico '${{ inputs.cliente }}'"
+
+      # Mostra o que a remoção faria, sem fazer. NÃO devolve número ao Twilio
+      # nem apaga assistente na Vapi — essas contas ficam intocadas.
+      - name: Remover cliente (simulação)
+        if: inputs.acao == 'remover-cliente'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker remover '${{ inputs.cliente }}'"
+
+      # APAGA DE VERDADE o cliente da Avexa. O número volta para o pool com o
+      # SID intacto; o assistente da Vapi fica e o script diz o id dele.
+      - name: Remover cliente (apagar)
+        if: inputs.acao == 'remover-cliente-confirmado'
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy "${{ inputs.usuario }}@${{ secrets.VPS_HOST }}" \
+            "cd /opt/avexa-motor/app && docker compose --env-file .env -f infra/docker-compose.prod.yml \
+             run --rm worker pnpm --filter @avexa/worker remover '${{ inputs.cliente }}' --apagar"
 
       # O que falta para um cliente fazer contato de verdade. Só lê: não liga
       # canal, não publica agente, não manda lead.
