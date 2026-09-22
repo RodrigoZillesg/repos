@@ -330,7 +330,10 @@ export async function adotarNumero(
     provedorSid: a.sid,
     status: 'atribuido' as const,
     projetoId: a.projetoId,
-    ...(a.capacidades?.length ? { capacidades: a.capacidades } : {}),
+    // Grava sempre, inclusive vazio: o que o Twilio diz agora é a verdade, e
+    // manter uma capacidade antiga porque a nova veio vazia é exatamente como
+    // um número deixa de mandar SMS sem ninguém notar.
+    capacidades: a.capacidades ?? [],
   }
 
   await db

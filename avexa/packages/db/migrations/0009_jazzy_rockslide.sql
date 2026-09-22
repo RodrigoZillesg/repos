@@ -1,0 +1,1 @@
+ALTER TABLE "numero" ALTER COLUMN "capacidades" SET DEFAULT '[]'::jsonb;

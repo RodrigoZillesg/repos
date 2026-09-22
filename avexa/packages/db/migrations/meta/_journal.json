@@ -64,6 +64,13 @@
       "when": 1790005680090,
       "tag": "0008_dark_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790076444029,
+      "tag": "0009_jazzy_rockslide",
+      "breakpoints": true
     }
   ]
 }

@@ -115,8 +115,14 @@ export const numero = pgTable(
     e164: text().notNull(),
     provedor: text().notNull().default('twilio'),
     provedorSid: text(),
-    /** Capacidades do número: ['voz','sms'] */
-    capacidades: jsonb().$type<string[]>().notNull().default(['voz', 'sms']),
+    /** O que este número faz, como o Twilio declara: ['voz','sms'].
+     *
+     *  Vazio significa "nunca lemos do Twilio", e é assim que nasce de
+     *  propósito. O padrão antigo era ['voz','sms'] — um número inserido sem
+     *  capacidade conhecida afirmava fazer os dois, e a afirmação só era
+     *  desmentida por uma mensagem que não chegou. Nem todo número manda SMS:
+     *  na Austrália um Local em geral só faz voz. */
+    capacidades: jsonb().$type<string[]>().notNull().default([]),
     status: numeroStatusEnum().notNull().default('livre'),
     /** Frente que fala por este número, e o único dono dele.
      *

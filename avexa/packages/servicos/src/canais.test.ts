@@ -11,6 +11,8 @@ interface Estado {
   canais: Array<{ canal: string; ativo: boolean; config: Record<string, unknown> }>
   agente: Array<{ vapiAssistantId: string | null }>
   publicados: Array<{ grafo: unknown }>
+  /** O que o Twilio diz que o número faz. Só é consultado quando há número. */
+  capacidades: string[]
   gravado: Record<string, unknown> | null
 }
 
@@ -21,9 +23,18 @@ interface Estado {
  *  Então cada elo devolve a si mesmo, e o resultado só é consumido quando
  *  alguém dá `await`: é aí que a fila avança. */
 function bancoCom(e: Estado): Db {
-  // A quarta é a busca da linha do canal, já em `definirCanal`. Sem ela o
-  // código acharia que a linha não existe e iria pelo caminho de inserir.
-  const fila = [e.canais, e.agente, e.publicados, [{ id: 'cc-1' }]]
+  // A busca das capacidades do número só acontece quando há número — por isso
+  // ela entra na fila condicionalmente. A última é a busca da linha do canal,
+  // já em `definirCanal`: sem ela o código acharia que a linha não existe e
+  // iria pelo caminho de inserir.
+  const temNumero = e.canais.some((c) => typeof c.config.numero === 'string')
+  const fila = [
+    e.canais,
+    e.agente,
+    e.publicados,
+    ...(temNumero ? [[{ capacidades: e.capacidades }]] : []),
+    [{ id: 'cc-1' }],
+  ]
   let i = 0
 
   const elo = (): unknown => {
@@ -59,6 +70,7 @@ const semNada = (): Estado => ({
   ],
   agente: [],
   publicados: [],
+  capacidades: ['voz', 'sms'],
   gravado: null,
 })
 
@@ -85,6 +97,37 @@ test('SMS com número é ligado', async () => {
   const r = await definirCanal(bancoCom(e), 'cli', 'sms', true)
   assert.equal(r.ok, true)
   assert.deepEqual(e.gravado, { ativo: true })
+})
+
+test('SMS com número que só faz voz é recusado', async () => {
+  // Nem todo número manda SMS: na Austrália um Local em geral só faz voz. Ter
+  // o número e ligar o canal deixaria a etapa no fluxo e a mensagem morrendo
+  // num 400 do Twilio — o mesmo silêncio de não ter número nenhum.
+  const e = comNumero()
+  e.capacidades = ['voz']
+  const r = await definirCanal(bancoCom(e), 'proj', 'sms', true)
+  assert.equal(r.ok, false)
+  assert.match(r.ok === false ? r.erro : '', /não manda SMS/)
+  assert.equal(e.gravado, null, 'nada foi gravado')
+})
+
+test('capacidade desconhecida bloqueia em vez de supor', async () => {
+  // Vazio significa "nunca lemos do Twilio". Supor que faz tudo é exatamente
+  // como o SMS silencioso começa.
+  const e = comNumero()
+  e.capacidades = []
+  const r = await definirCanal(bancoCom(e), 'proj', 'sms', true)
+  assert.equal(r.ok, false)
+  assert.match(r.ok === false ? r.erro : '', /não sabemos/)
+})
+
+test('ligação com número que só manda SMS é recusada', async () => {
+  const e = comNumero()
+  e.capacidades = ['sms']
+  e.agente = [{ vapiAssistantId: 'a1' }]
+  const r = await definirCanal(bancoCom(e), 'proj', 'ligacao', true)
+  assert.equal(r.ok, false)
+  assert.match(r.ok === false ? r.erro : '', /não faz ligação/)
 })
 
 test('ligação com número mas sem agente publicado é recusada', async () => {

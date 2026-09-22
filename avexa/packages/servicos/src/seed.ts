@@ -52,8 +52,12 @@ async function semear(): Promise<void> {
   }
 
   // O pool precisa existir antes da ativação: é dele que sai o número de voz.
+  // Faixa 555, reservada para ficção: nenhum destes existe no Twilio, e é o
+  // `provedorSid` nulo que marca isso. As capacidades são declaradas porque a
+  // coluna descreve o que o número faz — e um número de demonstração que não
+  // declara nada travaria os canais do seed sem ensinar nada.
   for (const e164 of ['+61255500101', '+61255500102', '+14155550101', '+14155550102']) {
-    await d.insert(numero).values({ e164 }).onConflictDoNothing()
+    await d.insert(numero).values({ e164, capacidades: ['voz', 'sms'] }).onConflictDoNothing()
   }
 
   const existentes = await d.select({ slug: cliente.slug }).from(cliente)

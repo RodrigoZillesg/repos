@@ -1,5 +1,14 @@
 import { and, eq } from 'drizzle-orm'
-import { agenteVoz, cliente, fluxo, fluxoVersao, projeto, projetoCanal, type Db } from '@avexa/db'
+import {
+  agenteVoz,
+  cliente,
+  fluxo,
+  fluxoVersao,
+  numero as tNumero,
+  projeto,
+  projetoCanal,
+  type Db,
+} from '@avexa/db'
 import { ETAPAS, type Canal, type Etapa, type Grafo } from '@avexa/core'
 
 /** Ligar e desligar canal de um PROJETO depois da ativação.
@@ -38,6 +47,15 @@ export interface EstadoCanal {
  *  contratar; os outros dois precisam de número. */
 const PRECISAM_DE_NUMERO = new Set<Canal>(['ligacao', 'sms'])
 
+/** Qual capacidade do número cada canal de telefonia exige.
+ *
+ *  Não é a mesma coisa ter número e o número servir. Nem todo número manda SMS:
+ *  na Austrália um `Local` em geral só faz voz, e quem manda mensagem é o
+ *  `Mobile`. Ter um Local atribuído e o canal de SMS ligado é o pior arranjo
+ *  possível — o painel diz contratado, o fluxo tem a etapa, e a mensagem morre
+ *  num 400 do Twilio que ninguém lê. */
+const CAPACIDADE_DO_CANAL: Partial<Record<Canal, string>> = { ligacao: 'voz', sms: 'sms' }
+
 /** Conta as etapas de um canal dentro da árvore, ramos e corpo incluídos. */
 function usaCanal(grafo: Grafo, canal: Canal): boolean {
   const olhar = (lista: Etapa[]): boolean =>
@@ -72,6 +90,19 @@ export async function estadoDosCanais(db: Db, projetoId: string): Promise<Estado
     CANAIS.map((c) => porCanal.get(c)?.config?.numero).find(
       (v): v is string => typeof v === 'string' && v.trim() !== '',
     ) ?? null
+
+  // As capacidades vêm da linha do número, não do config do canal: são fato do
+  // Twilio, e o config guarda escolha nossa. Vazio significa "não lemos do
+  // Twilio", e isso bloqueia em vez de passar — supor que um número faz tudo é
+  // como o SMS silencioso começa.
+  const [linhaNumero] = numero
+    ? await db
+        .select({ capacidades: tNumero.capacidades })
+        .from(tNumero)
+        .where(eq(tNumero.e164, numero))
+        .limit(1)
+    : []
+  const capacidades = linhaNumero?.capacidades ?? []
   const vozNaVapi = typeof porCanal.get('ligacao')?.config?.vozId === 'string'
   const agentePublicado = Boolean(agente[0]?.vapiAssistantId)
 
@@ -79,9 +110,18 @@ export async function estadoDosCanais(db: Db, projetoId: string): Promise<Estado
     const linha = porCanal.get(canal)
     const ativo = linha?.ativo ?? false
 
+    const exige = CAPACIDADE_DO_CANAL[canal]
+
     let falta: string | null = null
     if (PRECISAM_DE_NUMERO.has(canal) && !numero) {
       falta = 'este projeto não tem número. Atribua um antes de ligar o canal.'
+    } else if (exige && capacidades.length === 0) {
+      falta = `não sabemos o que o número ${numero} faz: as capacidades dele nunca foram lidas do Twilio. Confira em Números.`
+    } else if (exige && !capacidades.includes(exige)) {
+      falta =
+        canal === 'sms'
+          ? `o número ${numero} não manda SMS — ele só faz ${capacidades.join(' e ')}. Um número Mobile manda; um Local, em geral, não.`
+          : `o número ${numero} não faz ligação — ele só faz ${capacidades.join(' e ')}.`
     } else if (canal === 'ligacao' && !agentePublicado) {
       falta = 'o agente de voz ainda não foi publicado na Vapi.'
     } else if (canal === 'ligacao' && !vozNaVapi) {

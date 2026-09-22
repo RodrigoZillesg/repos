@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, Minus, TriangleAlert } from 'lucide-react'
 import { Botao } from '@/componentes/ui/botao'
 import { Ajuda, AreaTexto, Entrada, Rotulo, Selecao } from '@/componentes/ui/campo'
@@ -59,6 +59,25 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres, paises }: Pro
 
   const campo = <K extends keyof FormAtivacao>(k: K, v: FormAtivacao[K]) =>
     setForm((f) => ({ ...f, [k]: v }))
+
+  // Nem todo número serve para todo canal: na Austrália um Local em geral não
+  // manda SMS, quem manda é o Mobile. Um Local atribuído a quem contratou SMS
+  // deixaria o canal ligado e a mensagem morrendo num 400 do Twilio.
+  const precisa = [
+    ...(form.canais.ligacao ? ['voz'] : []),
+    ...(form.canais.sms ? ['sms'] : []),
+  ]
+  const serve = (capacidades: string[]) => precisa.every((c) => capacidades.includes(c))
+  const uteis = numerosLivres.filter((n) => serve(n.capacidades))
+
+  // Marcar SMS depois de já ter escolhido um número que só faz voz deixaria a
+  // escolha presa num número que a lista nem mostra mais. Quando o escolhido
+  // sai da lista, cai no primeiro que serve.
+  useEffect(() => {
+    if (form.numeroModo !== 'existente') return
+    if (uteis.some((n) => n.e164 === form.numeroE164)) return
+    setForm((f) => ({ ...f, numeroE164: uteis[0]?.e164 ?? '' }))
+  }, [form.numeroModo, form.numeroE164, uteis])
 
   function enviar() {
     iniciar(async () => setResultado(await aoAtivar(form)))
@@ -186,10 +205,12 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres, paises }: Pro
               {
                 k: 'existente' as const,
                 nome: 'Usar um número que já temos',
-                nota: numerosLivres.length
-                  ? `${numerosLivres.length} livre${numerosLivres.length > 1 ? 's' : ''}`
-                  : 'nenhum livre',
-                desabilitado: numerosLivres.length === 0,
+                nota: uteis.length
+                  ? `${uteis.length} serve${uteis.length > 1 ? 'm' : ''}`
+                  : numerosLivres.length
+                    ? `${numerosLivres.length} livre(s), nenhum com ${precisa.join(' + ')}`
+                    : 'nenhum livre',
+                desabilitado: uteis.length === 0,
               },
               {
                 k: 'comprar' as const,
@@ -218,24 +239,31 @@ export function Ativacao({ podeAtivar, t, aoAtivar, numerosLivres, paises }: Pro
             ))}
           </div>
 
-          {form.numeroModo === 'existente' && numerosLivres.length > 0 && (
+          {form.numeroModo === 'existente' && uteis.length > 0 && (
             <div className="mt-2">
               <Selecao
                 id="a-numero-livre"
                 value={form.numeroE164}
                 onChange={(e) => campo('numeroE164', e.target.value)}
               >
-                {numerosLivres.map((n) => (
+                {/* Só os que servem aparecem. Listar um número sem SMS para
+                    quem contratou SMS seria oferecer uma escolha que vira
+                    silêncio depois. */}
+                {uteis.map((n) => (
                   <option key={n.e164} value={n.e164}>
                     {/* O nome do Twilio vem junto: sem ele a lista é uma coluna
                         de dígitos, e ninguém sabe qual número é qual. */}
                     {n.e164}
                     {n.apelido ? ` · ${n.apelido}` : ' · sem nome no Twilio'} ·{' '}
-                    {n.capacidades.join(' + ')}
+                    {n.capacidades.join(' + ') || 'capacidades não lidas'}
                   </option>
                 ))}
               </Selecao>
-              <Ajuda>O nome ao lado é o que está gravado no Twilio.</Ajuda>
+              <Ajuda>
+                O nome ao lado é o que está gravado no Twilio.
+                {numerosLivres.length > uteis.length &&
+                  ` ${numerosLivres.length - uteis.length} número(s) livre(s) ficaram de fora por não fazerem ${precisa.join(' e ')}.`}
+              </Ajuda>
             </div>
           )}
 

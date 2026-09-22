@@ -326,7 +326,17 @@ export async function ativarCliente(
       if (!doPais) avisos.push(avisoDePais(alvo.e164, paisCliente))
     }
   } else {
-    const livres = await db.select().from(numero).where(eq(numero.status, 'livre'))
+    const todosLivres = await db.select().from(numero).where(eq(numero.status, 'livre'))
+
+    // Só serve o número que faz o que os canais contratados precisam. Um Local
+    // australiano não manda SMS: atribuí-lo a quem contratou SMS deixaria o
+    // canal ligado e a mensagem morrendo num 400 do Twilio.
+    const precisa = [
+      ...(entrada.canais.ligacao ? ['voz'] : []),
+      ...(entrada.canais.sms ? ['sms'] : []),
+    ]
+    const livres = todosLivres.filter((n) => precisa.every((c) => n.capacidades.includes(c)))
+
     // Prefere um número do país do cliente: ligar para um lead americano de um
     // número australiano derruba a taxa de atendimento. Só cai em outro país se
     // não houver escolha, e nesse caso o passo diz isso em vez de ficar calado.
@@ -349,9 +359,23 @@ export async function ativarCliente(
       if (!doPais) avisos.push(avisoDePais(livre.e164, paisCliente))
     } else {
       // Pool vazio não invalida a ativação: o resto funciona e alguém repõe.
-      marcar(3, 'Número do cliente', 'falhou', 'nenhum número livre no pool')
+      //
+      // Distingue "não há número" de "há, mas nenhum serve": as duas situações
+      // se resolvem de formas diferentes, e dizer só "pool vazio" mandaria
+      // alguém procurar um número que está ali na frente e não presta.
+      const faltaCapacidade = todosLivres.length > 0
+      marcar(
+        3,
+        'Número do cliente',
+        'falhou',
+        faltaCapacidade
+          ? `${todosLivres.length} número(s) livre(s), nenhum com ${precisa.join(' + ')}`
+          : 'nenhum número livre no pool',
+      )
       avisos.push(
-        'Nenhum número livre no pool: ligação e SMS não saem até alguém repor ou comprar.',
+        faltaCapacidade
+          ? `Há número livre no pool, mas nenhum com ${precisa.join(' e ')}. Um número Local em geral não manda SMS; compre um Mobile.`
+          : 'Nenhum número livre no pool: ligação e SMS não saem até alguém repor ou comprar.',
       )
     }
   }
